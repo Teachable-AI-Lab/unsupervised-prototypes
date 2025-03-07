@@ -8,6 +8,8 @@ import torch.nn.functional as F
 from tqdm import tqdm
 from sklearn.manifold import TSNE
 from sklearn.decomposition import PCA
+# umap
+# import umap
 from IPython.display import clear_output
 
 # define the model output class
@@ -139,6 +141,24 @@ def GumbelSigmoid(logits, tau=1, alpha=1, hard=False, dim=-1):
         ret = y_soft
     return ret
 
+def GumbelSoftmax(logits, tau=1, alpha=1, hard=False, dim=-1):
+    def _gumbel():
+        gumbel = -torch.empty_like(logits).exponential_().log()
+        if torch.isnan(gumbel).sum() or torch.isinf(gumbel).sum():
+            gumbel = _gumbel()
+        return gumbel
+    
+    gumbel = _gumbel()
+    gumbel = (logits + gumbel * alpha) / tau
+    y_soft = F.softmax(gumbel, dim=dim)
+    if hard:
+        index = y_soft.max(dim, keepdim=True)[1]
+        y_hard = torch.zeros_like(logits).scatter_(dim, index, 1.0)
+        ret = y_hard - y_soft.detach() + y_soft
+    else:
+        ret = y_soft
+    return ret
+
 def entropy_regularization(left_prob, eps=1e-8, lambda_=1, layer=0):
     entropy = - (left_prob * torch.log(left_prob + eps) + (1 - left_prob) * torch.log(1 - left_prob + eps))
     return entropy * lambda_
@@ -152,7 +172,8 @@ def cross_entropy_regularization(path_probs, depth=0, eps=1e-8, lambda_=1, n_lay
     # print(pp)
     a = F.softmax(pp, dim=-1)
     # print(path_probs.view(B, -1, 2).sum(dim=0), a)
-    equ = 1 / 2 ** (depth + 1)
+    equ = 1 / 2 ** (depth)
+    # print(f"equ: {equ}")
     # repeat equ to the shape of a
     equ = torch.tensor([equ] * a.shape[0], device=path_probs.device)
     # print(f"equ: {equ}")
@@ -168,6 +189,52 @@ def cross_entropy_regularization(path_probs, depth=0, eps=1e-8, lambda_=1, n_lay
     # lambda_ = lambda_ * (2 ** (-depth))
     return reg * lambda_
 
+import torch
+
+def layer_kld(mean, logvar, reduction='sum'):
+    """
+    Computes the KL divergence between each left/right child pair in a tree layer.
+
+    The distributions are assumed to be Gaussian:
+      - Left child: N(mean_left, var_left) with var_left = exp(logvar_left)
+      - Right child: N(mean_right, var_right) with var_right = exp(logvar_right)
+
+    The KL divergence from left to right is computed as:
+        0.5 * [ log(var_right/var_left) + (var_left + (mean_left - mean_right)**2)/var_right - 1 ]
+
+    Parameters:
+        mean (torch.Tensor): Tensor of shape (n_pairs, 2, 1), where each pair corresponds to
+                             the means of the left and right children.
+        logvar (torch.Tensor): Tensor of shape (n_pairs, 2, 1), corresponding log-variances.
+        reduction (str): Specifies the reduction over all pairs: 'sum' or 'mean'.
+
+    Returns:
+        kl (torch.Tensor): Reduced KL divergence across all pairs (scalar).
+        kl_each (torch.Tensor): KL divergence for each pair, shape (n_pairs, 1).
+    """
+    # Separate left and right children parameters
+    mean_left = mean[:, 0, :]   # shape: (n_pairs, 1)
+    mean_right = mean[:, 1, :]  # shape: (n_pairs, 1)
+    logvar_left = logvar[:, 0, :]
+    logvar_right = logvar[:, 1, :]
+
+    # Compute variance from log variance
+    var_left = torch.exp(logvar_left)
+    var_right = torch.exp(logvar_right)
+
+    # Compute the KL divergence for each pair:
+    # KL(N_left || N_right) = 0.5 * ( log(var_right/var_left) + (var_left + (mean_left - mean_right)^2) / var_right - 1 )
+    kl_each = 0.5 * (logvar_right - logvar_left + (var_left + (mean_left - mean_right) ** 2) / var_right - 1)
+
+    # Apply the specified reduction across all pairs
+    if reduction == 'sum':
+        kl = kl_each.sum()
+    elif reduction == 'mean':
+        kl = kl_each.mean()
+    else:
+        raise ValueError("Reduction must be either 'sum' or 'mean'.")
+
+    return kl, kl_each
 
 def test_model(model, test_data, device='cuda', batch_size=32, hard=False, leaf_only=False):
     test_loader = torch.utils.data.DataLoader(test_data, batch_size=batch_size, shuffle=False)
@@ -227,11 +294,25 @@ from io import BytesIO
 import json
 
 def tensor_to_base64(tensor, shape, cmap="gray", normalize=False):
-    array = tensor.numpy().reshape(shape)
-    if normalize:
-        plt.imshow(array, cmap=cmap, aspect="auto")
-    else:
-        plt.imshow(array, cmap=cmap, aspect="auto", vmin=0, vmax=1)
+    # print(tensor.shape)
+
+    # tensor has shape 1, channel, height, width
+    # array = tensor.view(shape)
+    # display image with rgb
+    # if normalize:
+    array = tensor.view(shape).permute(1, 2, 0).cpu().numpy() 
+    # denormalize the image with mean=[0.4914, 0.4822, 0.4465], std=[0.2023, 0.1994, 0.2010]
+    array = array * [0.247, 0.243, 0.261] + [0.4914, 0.4822, 0.4465]
+    # normalize from 0-1
+    # array = (array - array.min()) / (array.max() - array.min())
+    # print(array)
+    # return
+    plt.imshow(array)
+    # plt.show()
+
+        # plt.imshow(array, cmap=cmap, aspect="auto")
+    # else:
+        # plt.imshow(array, cmap=cmap, aspect="auto", vmin=0, vmax=1)
 
     plt.axis("off")
 
@@ -242,21 +323,32 @@ def tensor_to_base64(tensor, shape, cmap="gray", normalize=False):
     buf.seek(0)
     return base64.b64encode(buf.getvalue()).decode("utf-8")
 
-def viz_prototypes(model, shape=(28, 28), normalize=True):
+def viz_prototypes(model, shape=(3, 32, 32), conved_shape=(64, 5, 5), normalize=False):
     nodes = []
-    leaves = model.leaves.detach().cpu()
-
-    nodes.append(leaves)
+    leaves = model.leaves.detach()
+    with torch.no_grad():
+        # rec_leaves = model.decoder(leaves).detach().cpu()
+        rec_leaves = model.decoder(model.decoder_fc(leaves).view(-1, conved_shape[0], conved_shape[1], conved_shape[2])).detach()
+        # print(leaves.shape)
+    nodes.append(rec_leaves)
 
     for layer in model.layers:
-        alpha = F.sigmoid(layer.cluster_weight.detach().cpu())
+        alpha = F.sigmoid(layer.cluster_weight.detach())
         alpha = torch.cat((alpha, 1 - alpha), dim=1).unsqueeze(-1)
+        # print(leaves.shape)
+        # print(leaves.shape)
 
         leaves = leaves.view(-1, 2, leaves.shape[-1])
+        # print("leaf", leaves)
 
         parent_mean = (alpha * leaves).sum(dim=1) # shape: n_clusters, n_hidden
-
-        nodes.append(parent_mean)
+        # print(alpha)
+        # print("parent",parent_mean)
+        with torch.no_grad():
+            # rec_leaves = model.decoder(parent_mean).detach().cpu()
+            rec_leaves = model.decoder(model.decoder_fc(parent_mean).view(-1, conved_shape[0], conved_shape[1], conved_shape[2])).detach()
+        # print(rec_leaves.shape)
+        nodes.append(rec_leaves)
 
         leaves = parent_mean
 
@@ -270,7 +362,7 @@ def viz_data(nodes, shape=(28, 28), normalize=True):
 
     root = {
         "node_id": "0",
-        "image": tensor_to_base64(nodes[0], shape, cmap="inferno", normalize=normalize),
+        "image": tensor_to_base64(nodes[0][0], shape, cmap="inferno", normalize=normalize),
         # "dist_image": tensor_to_base64(torch.zeros(dist_shape), dist_shape, cmap="viridis"),
         "children": []
     }
@@ -284,6 +376,7 @@ def viz_data(nodes, shape=(28, 28), normalize=True):
         for data in data_list:
             if children_count % 2 == 0:
                 parent = parents.pop(0)
+            # print(data.shape)
             parent["children"].append({
                 "node_id": str(child_idx),
                 "image": tensor_to_base64(data, shape, cmap="inferno", normalize=True),
@@ -328,3 +421,103 @@ def viz_sampled_x(model, test_data, device='cuda', shape=(28, 28)):
 
     sampled = [s.detach().cpu() for s in sampled][::-1]
     viz_data(sampled, shape=shape, normalize=True)
+
+
+def viz_clusters(model, test_data, device='cuda', n_data=1000):
+    # sub plot of 1x3 for t-sne. PCA
+    fig, axes = plt.subplots(1, 2, figsize=(10, 5))
+    axes = axes.flatten()
+
+    test_loader = torch.utils.data.DataLoader(test_data, batch_size=n_data, shuffle=True)
+
+    # print(len(test_loader))
+    batch_size = n_data
+
+    all_representations = []
+    all_labels = []
+
+    # get representations
+    with torch.no_grad():
+        for input_x, input_y in test_loader:
+            conved = model.encoder(input_x.to(device))
+            print(conved.shape)
+            latent = model.encoder_fc(conved.view(batch_size, -1)).detach().cpu()
+            all_representations.append(latent)
+            all_labels.append(input_y)
+            break
+
+    all_representations = torch.cat(all_representations, dim=0)
+    all_labels = torch.cat(all_labels, dim=0)
+
+    # t-sne
+    tsne = TSNE(n_components=2)
+    tsne_outputs = tsne.fit_transform(all_representations)
+    axes[0].scatter(tsne_outputs[:, 0], tsne_outputs[:, 1], c=all_labels, cmap='tab10', s=5)
+    axes[0].set_title("t-SNE")
+    # colorbar
+    # axes[0].colorbar()
+
+    # PCA
+    pca = PCA(n_components=2)
+    pca_outputs = pca.fit_transform(all_representations)
+    axes[1].scatter(pca_outputs[:, 0], pca_outputs[:, 1], c=all_labels, cmap='tab10')
+    axes[1].set_title("PCA")
+    # colorbar
+    # axes[1].colorbar()
+
+    plt.show()
+
+def model_forzen_classification(model, train_data, test_data, device='cuda', batch_size=32):
+    train_loader = torch.utils.data.DataLoader(train_data, batch_size=batch_size, shuffle=True)
+    test_loader = torch.utils.data.DataLoader(test_data, batch_size=batch_size, shuffle=True)
+
+    labels = []
+    pred = []
+    model.eval()
+
+
+    classifier = nn.Linear(model.n_hidden, 10).to(device)
+    optimizer = torch.optim.Adam(classifier.parameters(), lr=1e-3)
+
+
+    # with torch.no_grad():
+    #     for x, y in test_loader:
+    #         reper = model.model.encoder_fc(model.encoder(x).view(-1, model.CNN_output_dim))
+
+    # reper = reper.detach()
+
+    # train the classifier
+    for epoch in range(10):
+        for x, y in tqdm(train_loader):
+            optimizer.zero_grad()
+            # print(x.shape)
+            x = x.to(device)
+            with torch.no_grad():
+                reper = model.encoder_fc(model.encoder(x).view(-1, model.CNN_output_dim)).detach().cpu()
+
+            logits = classifier(reper.to(device))
+            loss = F.cross_entropy(logits, y.to(device))
+            loss.backward()
+            optimizer.step()
+
+    # test the classifier
+    with torch.no_grad():
+        for x, y in tqdm(test_loader):
+            x = x.to(device)
+            with torch.no_grad():
+                reper = model.encoder_fc(model.encoder(x).view(-1, model.CNN_output_dim)).detach().cpu()
+            logits = classifier(reper.to(device))
+            labels.extend(y.tolist())
+            pred.extend(logits.argmax(dim=-1).tolist())
+
+        # calculate the accuracy
+        correct = 0
+        for l, p in zip(labels, pred):
+            if l == p:
+                correct += 1
+        accuracy = correct / len(labels)
+        print(f"Accuracy: {accuracy}")
+        return accuracy
+
+
+
