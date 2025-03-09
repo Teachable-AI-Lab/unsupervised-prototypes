@@ -11,6 +11,7 @@ import PIL
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 import untils
+import AUTOENCODERS
 
 ## Maximize predictive prower for each node
 class CobwebNNTreeLayer(nn.Module):
@@ -54,7 +55,7 @@ class CobwebNNTreeLayer(nn.Module):
         return mean_root, logvar_root
     
 class CobwebNN(nn.Module):
-    def __init__(self, image_shape, n_hidden, n_layers):
+    def __init__(self, encoder=None, decoder=None, image_shape=(1,28,28), n_hidden=128, n_layers=3):
         super(CobwebNN, self).__init__()
         self.image_shape = image_shape
         self.n_hidden = n_hidden
@@ -73,99 +74,103 @@ class CobwebNN(nn.Module):
         # self.logvar = nn.Linear(400, n_hidden)
 
 
+        self.encoder = encoder
+        self.decoder = decoder
 
-        C, H, W = image_shape
-        self.input_dim = C * H * W
 
-        self.fc = nn.Linear(self.input_dim, 400)
-        self.mu = nn.Linear(400, n_hidden)
 
+        # C, H, W = image_shape
+        # self.input_dim = C * H * W
+
+        # self.fc = nn.Linear(self.input_dim, 400)
+        # self.mu = nn.Linear(400, n_hidden)
+
+        # # self.encoder = nn.Sequential(
+        # #     nn.Linear(self.input_dim, 400),
+        # #     nn.ReLU(),
+        # #     nn.Linear(400, self.n_hidden)
+        # # )
+
+
+        # # self.decoder = nn.Sequential(
+        # #     nn.Linear(self.n_hidden, 400),
+        # #     nn.ReLU(),
+        # #     nn.Linear(400, self.input_dim)
+        # # )
+
+        # CNN_config = {
+        #     'conv1': [C, 16, 3, 2, 1],
+        #     'conv2': [16, 32, 3, 2, 1],
+        #     'conv3': [32, 64, 3, 1, 0],
+        # }
+
+        # # CNN autoencoder
         # self.encoder = nn.Sequential(
-        #     nn.Linear(self.input_dim, 400),
+        #     # nn.Conv2d(C, 16, 3, stride=2, padding=1),
+        #     nn.Conv2d(CNN_config['conv1'][0], 
+        #               CNN_config['conv1'][1], 
+        #               CNN_config['conv1'][2], 
+        #               stride=CNN_config['conv1'][3], 
+        #               padding=CNN_config['conv1'][4]),
         #     nn.ReLU(),
-        #     nn.Linear(400, self.n_hidden)
+        #     # nn.Conv2d(16, 32, 3, stride=2, padding=1),
+        #     nn.Conv2d(CNN_config['conv2'][0], 
+        #               CNN_config['conv2'][1], 
+        #               CNN_config['conv2'][2], 
+        #               stride=CNN_config['conv2'][3], 
+        #               padding=CNN_config['conv2'][4]),
+        #     nn.ReLU(),
+        #     # nn.Conv2d(32, 64, 3),
+        #     nn.Conv2d(CNN_config['conv3'][0], 
+        #               CNN_config['conv3'][1], 
+        #               CNN_config['conv3'][2], 
+        #               stride=CNN_config['conv3'][3], 
+        #               padding=CNN_config['conv3'][4]),
+        #     nn.ReLU(),
         # )
 
+        # self.H_conv = H
+        # self.W_conv = W
+        # self.out_channels = CNN_config['conv3'][1]
 
+        # # infer the shape of the output of the encoder
+        # for CNN_layer in CNN_config.values():
+        #     self.H_conv = (self.H_conv + CNN_layer[4] * 2 - CNN_layer[2]) // CNN_layer[3] + 1
+        #     self.W_conv = (self.W_conv + CNN_layer[4] * 2 - CNN_layer[2]) // CNN_layer[3] + 1
+
+        # self.CNN_output_dim = self.out_channels * self.H_conv * self.W_conv
+
+        # # self.encoder_fc = nn.Linear(64 * 5 * 5, self.n_hidden)
+        # self.encoder_fc = nn.Linear(self.H_conv * self.W_conv * self.out_channels, self.n_hidden)
+
+        # # self.decoder_fc = nn.Linear(self.n_hidden, 64 * 5 * 5)
+        # self.decoder_fc = nn.Linear(self.n_hidden, self.H_conv * self.W_conv * self.out_channels)
         # self.decoder = nn.Sequential(
-        #     nn.Linear(self.n_hidden, 400),
         #     nn.ReLU(),
-        #     nn.Linear(400, self.input_dim)
+        #     # nn.ConvTranspose2d(64, 32, 3),
+        #     nn.ConvTranspose2d(CNN_config['conv3'][1],
+        #                        CNN_config['conv3'][0],
+        #                        CNN_config['conv3'][2]),
+
+        #     nn.ReLU(),
+        #     # nn.ConvTranspose2d(32, 16, 3, stride=2, padding=1, output_padding=1),
+        #     nn.ConvTranspose2d(CNN_config['conv2'][1],
+        #                         CNN_config['conv2'][0],
+        #                         CNN_config['conv2'][2],
+        #                         stride=CNN_config['conv2'][3],
+        #                         padding=CNN_config['conv2'][4],
+        #                         output_padding=1),
+        #     nn.ReLU(),
+        #     # nn.ConvTranspose2d(16, C, 3, stride=2, padding=1, output_padding=1),
+        #     nn.ConvTranspose2d(CNN_config['conv1'][1],
+        #                         CNN_config['conv1'][0],
+        #                         CNN_config['conv1'][2],
+        #                         stride=CNN_config['conv1'][3],
+        #                         padding=CNN_config['conv1'][4],
+        #                         output_padding=1),
+
+        #     # nn.Sigmoid()
         # )
-
-        CNN_config = {
-            'conv1': [C, 16, 3, 2, 1],
-            'conv2': [16, 32, 3, 2, 1],
-            'conv3': [32, 64, 3, 1, 0],
-        }
-
-        # CNN autoencoder
-        self.encoder = nn.Sequential(
-            # nn.Conv2d(C, 16, 3, stride=2, padding=1),
-            nn.Conv2d(CNN_config['conv1'][0], 
-                      CNN_config['conv1'][1], 
-                      CNN_config['conv1'][2], 
-                      stride=CNN_config['conv1'][3], 
-                      padding=CNN_config['conv1'][4]),
-            nn.ReLU(),
-            # nn.Conv2d(16, 32, 3, stride=2, padding=1),
-            nn.Conv2d(CNN_config['conv2'][0], 
-                      CNN_config['conv2'][1], 
-                      CNN_config['conv2'][2], 
-                      stride=CNN_config['conv2'][3], 
-                      padding=CNN_config['conv2'][4]),
-            nn.ReLU(),
-            # nn.Conv2d(32, 64, 3),
-            nn.Conv2d(CNN_config['conv3'][0], 
-                      CNN_config['conv3'][1], 
-                      CNN_config['conv3'][2], 
-                      stride=CNN_config['conv3'][3], 
-                      padding=CNN_config['conv3'][4]),
-            nn.ReLU(),
-        )
-
-        self.H_conv = H
-        self.W_conv = W
-        self.out_channels = CNN_config['conv3'][1]
-
-        # infer the shape of the output of the encoder
-        for CNN_layer in CNN_config.values():
-            self.H_conv = (self.H_conv + CNN_layer[4] * 2 - CNN_layer[2]) // CNN_layer[3] + 1
-            self.W_conv = (self.W_conv + CNN_layer[4] * 2 - CNN_layer[2]) // CNN_layer[3] + 1
-
-        self.CNN_output_dim = self.out_channels * self.H_conv * self.W_conv
-
-        # self.encoder_fc = nn.Linear(64 * 5 * 5, self.n_hidden)
-        self.encoder_fc = nn.Linear(self.H_conv * self.W_conv * self.out_channels, self.n_hidden)
-
-        # self.decoder_fc = nn.Linear(self.n_hidden, 64 * 5 * 5)
-        self.decoder_fc = nn.Linear(self.n_hidden, self.H_conv * self.W_conv * self.out_channels)
-        self.decoder = nn.Sequential(
-            nn.ReLU(),
-            # nn.ConvTranspose2d(64, 32, 3),
-            nn.ConvTranspose2d(CNN_config['conv3'][1],
-                               CNN_config['conv3'][0],
-                               CNN_config['conv3'][2]),
-
-            nn.ReLU(),
-            # nn.ConvTranspose2d(32, 16, 3, stride=2, padding=1, output_padding=1),
-            nn.ConvTranspose2d(CNN_config['conv2'][1],
-                                CNN_config['conv2'][0],
-                                CNN_config['conv2'][2],
-                                stride=CNN_config['conv2'][3],
-                                padding=CNN_config['conv2'][4],
-                                output_padding=1),
-            nn.ReLU(),
-            # nn.ConvTranspose2d(16, C, 3, stride=2, padding=1, output_padding=1),
-            nn.ConvTranspose2d(CNN_config['conv1'][1],
-                                CNN_config['conv1'][0],
-                                CNN_config['conv1'][2],
-                                stride=CNN_config['conv1'][3],
-                                padding=CNN_config['conv1'][4],
-                                output_padding=1),
-
-            # nn.Sigmoid()
-        )
 
 
 
@@ -249,7 +254,9 @@ class CobwebNN(nn.Module):
 
         # print(self.out_channels, self.H_conv, self.W_conv, self.CNN_output_dim)
 
-        x_mu = self.encoder_fc(self.encoder(x).view(-1, self.CNN_output_dim))
+        # x_mu = self.encoder_fc(self.encoder(x).view(-1, self.CNN_output_dim))
+
+        x_mu = self.encoder(x) # shape: B, n_hidden
 
 
         # x_mu = self.mu(self.relu(self.fc(x)))
@@ -288,7 +295,8 @@ class CobwebNN(nn.Module):
         sampled_x = (kl_probs.unsqueeze(-1) * sampled_x).sum(dim=1) # shape: B, n_hidden
 
         # x_pred = self.decoder(sampled_x) # shape: B, input_dim
-        x_pred = self.decoder(self.decoder_fc(sampled_x).view(-1, self.out_channels, self.H_conv, self.W_conv))
+        # x_pred = self.decoder(self.decoder_fc(sampled_x).view(-1, self.out_channels, self.H_conv, self.W_conv))
+        x_pred = self.decoder(sampled_x) # shape: B, input_dim
 
         # x_pred = self.decoder(self.decoder_fc(sampled_x).view(-1, 16, 16, 16))
 
@@ -330,8 +338,8 @@ class CobwebNN(nn.Module):
             sampled_x = self.sample(parent_root, parent_logvar) # shape: B, n_hidden
             # weighted combination
             sampled_x = (kl_probs.unsqueeze(-1) * sampled_x).sum(dim=1) # shape: B, n_hidden
-            # x_pred = self.decoder(sampled_x) # shape: B, input_dim
-            x_pred = self.decoder(self.decoder_fc(sampled_x).view(-1, self.out_channels, self.H_conv, self.W_conv))
+            x_pred = self.decoder(sampled_x) # shape: B, input_dim
+            # x_pred = self.decoder(self.decoder_fc(sampled_x).view(-1, self.out_channels, self.H_conv, self.W_conv))
             # x_pred = self.decoder(self.decoder_fc(sampled_x).view(-1, 16, 16, 16))
             x_preds.append(x_pred)
 
