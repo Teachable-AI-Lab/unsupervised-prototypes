@@ -5,6 +5,8 @@ import matplotlib.pyplot as plt
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torchvision import transforms, datasets
+from torch.utils.data import DataLoader
 from tqdm import tqdm
 from sklearn.manifold import TSNE
 from sklearn.decomposition import PCA
@@ -436,14 +438,49 @@ def viz_clusters(model, test_data, device='cuda', n_data=1000):
     all_representations = []
     all_labels = []
 
+    # leaves = model.leaves.detach()
+    # print(leaves.shape)
+    prototypes1 = None
+    prototypes2 = None
+    prototypes3 = None
     # get representations
     with torch.no_grad():
         for input_x, input_y in test_loader:
+
+            x, means, logvars, x_preds, p_x_nodes, p_node_xs, x_latent, x_samples = model(input_x.to(device))
+            # print(p_node_xs[0].shape)
+            print(torch.argmax(p_node_xs[0], dim=-1))
+            # break
+
+            # input_x = input_x.expand(-1, 3, -1, -1)
+        # pad to 32x32
+            # input_x = F.pad(input_x, (2, 2, 2, 2), value=0)
             conved = model.encoder(input_x.to(device))
-            print(conved.shape)
-            latent = model.encoder_fc(conved.view(batch_size, -1)).detach().cpu()
+            latent = model.pre_quantization_conv(conved).view(-1, 512).detach().cpu()
+
+            latent = x_samples[0].detach().cpu()
+            # print(conved.shape)
+            # latent = model.encoder_fc(conved.view(batch_size, -1))
+            # latent = model.encoder_bn(latent).detach().cpu()
+            # latent = F.tanh(latent)
+            print(latent.min(), latent.max())
+            print(model.leaves.min(), model.leaves.max())
+            print(f"alpha: {F.sigmoid(model.layers[0].cluster_weight)}")
+            # print(model.prototype_encoder(model.prototype_noise).min(), model.prototype_encoder(model.prototype_noise).max())
+            print(latent.shape)
             all_representations.append(latent)
             all_labels.append(input_y)
+            prototypes1 = means[-1].detach().cpu()
+            prototypes2 = means[-2].detach().cpu()
+            prototypes3 = means[-3].detach().cpu()
+            # print(prototypes.shape)
+            all_representations.append(prototypes1)
+            all_representations.append(prototypes2)
+            all_representations.append(prototypes3)
+
+            all_labels.append(torch.tensor([10] * prototypes1.shape[0]))
+            all_labels.append(torch.tensor([11] * prototypes2.shape[0]))
+            all_labels.append(torch.tensor([12] * prototypes3.shape[0]))
             break
 
     all_representations = torch.cat(all_representations, dim=0)
@@ -452,10 +489,24 @@ def viz_clusters(model, test_data, device='cuda', n_data=1000):
     # t-sne
     tsne = TSNE(n_components=2)
     tsne_outputs = tsne.fit_transform(all_representations)
-    axes[0].scatter(tsne_outputs[:, 0], tsne_outputs[:, 1], c=all_labels, cmap='tab10', s=5)
+    print(tsne_outputs.shape)
+    axes[0].scatter(tsne_outputs[0:1000, 0], tsne_outputs[0:n_data, 1], c=all_labels[0:n_data], cmap='tab10', s=5)
+
+    axes[0].scatter(tsne_outputs[n_data:n_data+1, 0], tsne_outputs[n_data:n_data+1, 1], c='black', s=20)  
+    axes[0].scatter(tsne_outputs[n_data+1:n_data+3, 0], tsne_outputs[n_data+1:n_data+3, 1], c='red', s=20)
+    axes[0].scatter(tsne_outputs[n_data+3:n_data+7, 0], tsne_outputs[n_data+3:n_data+7, 1], c='blue', s=20)
+
+    
     axes[0].set_title("t-SNE")
     # colorbar
     # axes[0].colorbar()
+
+    # do tsne on the prototypes
+    # prototypes = model.leaves.detach().cpu()
+    # tsne_outputs = tsne.fit_transform(prototypes)
+    # axes[0].scatter(tsne_outputs[:, 0], tsne_outputs[:, 1], c='black', s=3)
+    # axes[0].set_title("t-SNE")
+
 
     # PCA
     pca = PCA(n_components=2)
@@ -467,17 +518,98 @@ def viz_clusters(model, test_data, device='cuda', n_data=1000):
 
     plt.show()
 
-def model_forzen_classification(model, train_data, test_data, device='cuda', batch_size=32):
-    train_loader = torch.utils.data.DataLoader(train_data, batch_size=batch_size, shuffle=True)
-    test_loader = torch.utils.data.DataLoader(test_data, batch_size=batch_size, shuffle=True)
+
+def viz_examplar(model, test_data, n_data=1000, device='cuda', layer=3, k=10, normalize=False, do_centroids=False):
+    # get image representations
+    recons = None
+    image_labels = []
+
+    test_loader = DataLoader(test_data, batch_size=n_data, shuffle=True)
+    if do_centroids:
+        k = 1
+
+    with torch.no_grad():
+        for i, (data, target) in enumerate(test_loader):
+            data = data.to(device)
+            # print(data.shape)
+            x, means, logvars, x_preds, p_x_nodes, p_node_xs, x_latent, _ = model(data)
+            # x_latent: shape (batch_size, n_hidden)
+            clusters = means[-layer].detach().cpu() # shape (n_clusters, n_hidden)
+            x_latent = x_latent.detach().cpu() # shape (batch_size, n_hidden)
+            # print(clusters.shape)
+            # get the k nearest neighbors for each cluster
+            # get the distance between each x_latent and each cluster
+            distances = torch.norm(x_latent.unsqueeze(1) - clusters.unsqueeze(0), p=2, dim=-1).cpu() # shape (batch_size, n_clusters)
+            # get the k nearest neighbors
+            # print(distances.shape)
+            # print(x_latent.shape) # (batch_size, n_hidden)
+            # print(distances)
+            # print(distances.T) # (n_clusters, batch_size)
+            _, topk = distances.T.topk(k, dim=-1, largest=False)
+            # print(topk.shape) # (n_clusters, k)
+            # print(topk)
+            # for each cluster, index the top k nearest neighbors from x_latent, return a n_clusters x k x n_hidden tensor
+            if not do_centroids:
+                examplars = torch.stack([x_latent[topk[i]] for i in range(topk.shape[0])]).to(device)
+                # print(examplars.shape)
+                examplars = examplars.view(-1, model.n_hidden) # shape (n_clusters * k, n_hidden)
+
+            if do_centroids:
+                examplars = clusters.view(-1, model.n_hidden).to(device) # shape (n_clusters, n_hidden)
+
+            # pass the examplars to the decoder
+            x_pred = model.decoder(examplars.view(-1, model.n_hidden, 1, 1)) # shape (n_clusters * k, 3, 32, 32)
+            x_pred = x_pred.view(topk.shape[0], topk.shape[1], 3, 32, 32).detach().cpu() # shape (n_clusters, k, 3, 32, 32)
+            # print(x_pred.shape)
+
+            # image_labels.append(target)
+            break
+
+    # plot the examplars
+    fig, axes = plt.subplots(topk.shape[0], topk.shape[1], figsize=(8, 8),
+                            gridspec_kw={'wspace': 0, 'hspace': 0})
+    for i in range(topk.shape[0]):
+        if topk.shape[1] == 1:
+            if normalize:
+                img = x_pred[i, 0].permute(1, 2, 0).numpy()
+                img = img * [0.5, 0.5, 0.5] + [0.5, 0.5, 0.5]
+                axes[i].imshow(img)
+            else:
+                axes[i].imshow(x_pred[i, 0].permute(1, 2, 0).numpy())
+            axes[i].axis('off')
+            continue
+        for j in range(topk.shape[1]):
+            if normalize:
+                img = x_pred[i, j].permute(1, 2, 0).numpy()
+                img = img * [0.5, 0.5, 0.5] + [0.5, 0.5, 0.5]
+                axes[i, j].imshow(img)
+            else:
+                axes[i, j].imshow(x_pred[i, j].permute(1, 2, 0).numpy())
+            axes[i, j].axis('off')
+    plt.subplots_adjust(left=0, right=1, top=1, bottom=0, wspace=0, hspace=0)
+    # plt.show()
+    return fig
+
+
+
+
+def model_forzen_classification(model, train_data, test_data, device='cuda', lr=5e-2, epochs=30, batch_size=128):
+    train_loader = torch.utils.data.DataLoader(train_data, batch_size=batch_size, shuffle=True, num_workers=4, pin_memory=True)
+    test_loader = torch.utils.data.DataLoader(test_data, batch_size=batch_size, shuffle=True, num_workers=4, pin_memory=True)
 
     labels = []
     pred = []
     model.eval()
 
+    # print model's device
+    # print(f'Model device: {next(model.parameters()).device}')
+
 
     classifier = nn.Linear(model.n_hidden, 10).to(device)
-    optimizer = torch.optim.Adam(classifier.parameters(), lr=1e-3)
+    optimizer = torch.optim.Adam(classifier.parameters(), lr=lr)
+
+    # print(model.device)
+    # print(classifier.device)
 
 
     # with torch.no_grad():
@@ -485,27 +617,51 @@ def model_forzen_classification(model, train_data, test_data, device='cuda', bat
     #         reper = model.model.encoder_fc(model.encoder(x).view(-1, model.CNN_output_dim))
 
     # reper = reper.detach()
-
+    all_losses = []
     # train the classifier
-    for epoch in range(10):
-        for x, y in tqdm(train_loader):
+    for epoch in range(epochs):
+        for x, y in train_loader:
             optimizer.zero_grad()
+
             # print(x.shape)
             x = x.to(device)
+            # with torch.no_grad():
+                # x = x.expand(-1, 3, -1, -1)
+                # x, means, logvars, x_preds, p_x_nodes, p_node_xs, x_latent, x_samples = model(x.to(device))
+            # reper = x_samples[0].detach().cpu()
+
+            #with torch.no_grad():
+                # x = x.expand(-1, 3, -1, -1)
+        # pad to 32x32
+                # x = F.pad(x, (2, 2, 2, 2), value=0)
+                # reper = model.encoder_fc(model.encoder(x).view(-1, model.CNN_output_dim)).detach().cpu()
             with torch.no_grad():
-                reper = model.encoder_fc(model.encoder(x).view(-1, model.CNN_output_dim)).detach().cpu()
+                reper = model.encoder(x)#.view(-1, 512)#.detach().cpu()
+                reper = model.pre_quantization_conv(reper).view(-1, model.n_hidden)#.detach()
+                # reper = model.encoder_fc(reper.view(-1, 512))
+                # reper = model.encoder_bn(reper).detach().cpu()
 
             logits = classifier(reper.to(device))
+            # check if the parameters are updated
+            # print(classifier.weight)
             loss = F.cross_entropy(logits, y.to(device))
             loss.backward()
+            all_losses.append(loss.item())
             optimizer.step()
+
+    # plt.plot(all_losses)
 
     # test the classifier
     with torch.no_grad():
-        for x, y in tqdm(test_loader):
+        for x, y in test_loader:
             x = x.to(device)
             with torch.no_grad():
-                reper = model.encoder_fc(model.encoder(x).view(-1, model.CNN_output_dim)).detach().cpu()
+                # x = x.expand(-1, 3, -1, -1)
+        # pad to 32x32
+                # x = F.pad(x, (2, 2, 2, 2), value=0)
+                # reper = model.encoder_fc(model.encoder(x).view(-1, model.CNN_output_dim)).detach().cpu()
+                reper = model.encoder(x)#.view(-1, 512)#.detach().cpu()
+                reper = model.pre_quantization_conv(reper).view(-1, model.n_hidden).detach()
             logits = classifier(reper.to(device))
             labels.extend(y.tolist())
             pred.extend(logits.argmax(dim=-1).tolist())
@@ -517,7 +673,35 @@ def model_forzen_classification(model, train_data, test_data, device='cuda', bat
                 correct += 1
         accuracy = correct / len(labels)
         print(f"Accuracy: {accuracy}")
-        return accuracy
+    model.train()
+    return accuracy
 
 
 
+##################################################
+# data loader
+
+def get_data_loader(dataset, batch_size, normalize):
+    if dataset == 'cifar-10':
+        # load CIFAR10
+        download = False
+        dataset_class = datasets.CIFAR10
+        if normalize:
+            cifar10_transform = transforms.Compose([
+                transforms.ToTensor(),
+                transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+            ])
+        else:
+            cifar10_transform = transforms.Compose([
+            transforms.ToTensor(),
+            # transforms.Normalize(mean=[0.4914, 0.4822, 0.4465], 
+                                #  std=[0.247, 0.243, 0.261])
+            ])
+
+        cifar10_train = dataset_class('data/CIFAR10', train=True, download=download, transform=cifar10_transform)
+        cifar10_test = dataset_class('data/CIFAR10', train=False, download=download, transform=cifar10_transform)
+
+        cifar10_train_loader = DataLoader(cifar10_train, batch_size=batch_size, shuffle=True, num_workers=4, pin_memory=True)
+        cifar10_test_loader = DataLoader(cifar10_test, batch_size=batch_size*2, shuffle=True, num_workers=4, pin_memory=True)
+
+        return cifar10_train_loader, cifar10_test_loader, cifar10_train, cifar10_test

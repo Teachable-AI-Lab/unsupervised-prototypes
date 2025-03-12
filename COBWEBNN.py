@@ -11,7 +11,8 @@ import PIL
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 import untils
-import AUTOENCODERS
+from encoder_decoder.resnet_encoder import Encoder, BasicBlockEnc
+from encoder_decoder.restnet_decoder import Decoder, BasicBlockDec
 
 ## Maximize predictive prower for each node
 class CobwebNNTreeLayer(nn.Module):
@@ -55,14 +56,32 @@ class CobwebNNTreeLayer(nn.Module):
         return mean_root, logvar_root
     
 class CobwebNN(nn.Module):
-    def __init__(self, encoder=None, decoder=None, image_shape=(1,28,28), n_hidden=128, n_layers=3):
+    def __init__(self, image_shape=(1,28,28), n_hidden=128, n_layers=3, disable_decoder_sigmoid=False):
         super(CobwebNN, self).__init__()
         self.image_shape = image_shape
         self.n_hidden = n_hidden
         self.n_layers = n_layers
 
-        self.leaves = nn.Parameter(torch.randn(2**n_layers, n_hidden))
-        self.leaves_logvar = nn.Parameter(torch.randn(2**n_layers, n_hidden))
+        # self.leaves = nn.Parameter(torch.randn(2**n_layers, n_hidden))
+        # limit = 1 / torch.sqrt(torch.tensor(n_hidden, dtype=torch.float32))
+        # limit = 3 ** 0.5
+        # use kaiming uniform initialization
+        limit = 1 / (2 ** n_layers)
+        # limit = 3 ** 0.5
+        self.leaves = nn.Parameter(torch.nn.init.uniform_(torch.empty(2**n_layers, n_hidden), 
+                                                          -limit, limit))
+        # self.leaves_logvar = nn.Parameter(torch.randn(2**n_layers, n_hidden))
+        self.leaves_logvar = nn.Parameter(torch.zeros(2**n_layers, n_hidden))
+        # sample 2**n_layers datapoints from uniform distribution with shape (2**n_layers, image_shape)
+        # self.prototype_noise = torch.rand(2**n_layers, image_shape[0], image_shape[1], image_shape[2], device='cuda')
+        # print(self.prototype_noise.min(), self.prototype_noise.max())
+        # print(self.prototype_noise.shape)
+        # xaiver initialization
+        # self.leaves = nn.Parameter(torch.nn.init.xavier_normal_(torch.empty(2**n_layers, n_hidden)))
+        # self.leaves_logvar = nn.Parameter(torch.nn.init.xavier_normal_(torch.empty(2**n_layers, n_hidden)))
+
+        # self.leaves = nn.Parameter(torch.rand(2**n_layers, n_hidden) * torch.sqrt(torch.tensor(n_hidden)))
+        # self.leaves_logvar = nn.Parameter(torch.rand(2**n_layers, n_hidden) * torch.sqrt(torch.tensor(n_hidden)))
 
         self.layers = nn.ModuleList(
             [CobwebNNTreeLayer(n_hidden, 2**i) for i in reversed(range(0, n_layers))]
@@ -74,8 +93,12 @@ class CobwebNN(nn.Module):
         # self.logvar = nn.Linear(400, n_hidden)
 
 
-        self.encoder = encoder
-        self.decoder = decoder
+        self.encoder = Encoder(BasicBlockEnc, [2, 2, 2, 2])
+        # self.prototype_encoder = prototype_encoder
+        self.decoder = Decoder(BasicBlockDec, [2, 2, 2, 2], disable_decoder_sigmoid=disable_decoder_sigmoid)
+
+        # batch norm for the encoder that transforms latent space to Gaussian space
+        self.encoder_bn = nn.BatchNorm1d(n_hidden)
 
 
 
@@ -133,17 +156,18 @@ class CobwebNN(nn.Module):
         # self.W_conv = W
         # self.out_channels = CNN_config['conv3'][1]
 
-        # # infer the shape of the output of the encoder
+        # # # infer the shape of the output of the encoder
         # for CNN_layer in CNN_config.values():
         #     self.H_conv = (self.H_conv + CNN_layer[4] * 2 - CNN_layer[2]) // CNN_layer[3] + 1
         #     self.W_conv = (self.W_conv + CNN_layer[4] * 2 - CNN_layer[2]) // CNN_layer[3] + 1
 
         # self.CNN_output_dim = self.out_channels * self.H_conv * self.W_conv
 
-        # # self.encoder_fc = nn.Linear(64 * 5 * 5, self.n_hidden)
+        self.encoder_fc = nn.Linear(512, self.n_hidden)
+        self.pre_quantization_conv = nn.Conv2d(512, 512, kernel_size=1, stride=1)
         # self.encoder_fc = nn.Linear(self.H_conv * self.W_conv * self.out_channels, self.n_hidden)
 
-        # # self.decoder_fc = nn.Linear(self.n_hidden, 64 * 5 * 5)
+        self.decoder_fc = nn.Linear(self.n_hidden, 512)
         # self.decoder_fc = nn.Linear(self.n_hidden, self.H_conv * self.W_conv * self.out_channels)
         # self.decoder = nn.Sequential(
         #     nn.ReLU(),
@@ -255,8 +279,23 @@ class CobwebNN(nn.Module):
         # print(self.out_channels, self.H_conv, self.W_conv, self.CNN_output_dim)
 
         # x_mu = self.encoder_fc(self.encoder(x).view(-1, self.CNN_output_dim))
+        # x_mu = F.tanh(x_mu)
+        # print(x_mu.min(), x_mu.max())
+        x_mu = self.encoder(x)
+        x_mu = self.pre_quantization_conv(x_mu).view(-1, 512)
+        # exit()
+        # leaves = self.prototype_encoder(self.prototype_noise).view(-1, self.n_hidden)
 
-        x_mu = self.encoder(x) # shape: B, n_hidden
+        # x_mu = self.encoder_fc(x_mu) # Gaussian space
+        # x_mu = self.encoder_bn(x_mu)
+        # print(x_mu.min(), x_mu.max())
+
+        # x_mu = self.encoder(x).view(-1, 512) # shape: B, n_hidden
+        # x_mu = self.encoder_fc(x_mu)
+        # print(x_mu.min(), x_mu.max())
+        # print(leaves.min(), leaves.max())
+        # exit()
+        # x_mu = nn.Tanh()(x_mu)
 
 
         # x_mu = self.mu(self.relu(self.fc(x)))
@@ -265,6 +304,7 @@ class CobwebNN(nn.Module):
         # B = x.size(0)
         
         parent_root = self.leaves
+        # parent_root = leaves
         parent_logvar = self.leaves_logvar
         means = []
         logvars = []
@@ -273,10 +313,11 @@ class CobwebNN(nn.Module):
         p_node_x = []
         layer_logits = []
         x_preds = []
+        x_samples = []
 
         hard = False
-        alpha = 0.2
-        tau = 1
+        alpha = 0.0
+        tau = 0.05
 
         # kl_div = self.kl_div(x_mu, x_logvar, parent_root, parent_logvar)
         # distance to root
@@ -289,14 +330,19 @@ class CobwebNN(nn.Module):
         p_node_x.append(kl_probs)
         # print(kl_probs.shape)
         # print(kl_probs)
-        sampled_x = self.sample(parent_root, parent_logvar) # shape: n_clusters, n_hidden
+        # sampled_x = self.sample(parent_root, parent_logvar) # shape: n_clusters, n_hidden
         # print(sampled_x.shape)
         # weighted combination
-        sampled_x = (kl_probs.unsqueeze(-1) * sampled_x).sum(dim=1) # shape: B, n_hidden
+        sampled_x = (kl_probs.unsqueeze(-1) * parent_root).sum(dim=1) # shape: B, n_hidden
+
+        # print the range of the sampled_x
+        # print(sampled_x.min(), sampled_x.max())
+        # print()
 
         # x_pred = self.decoder(sampled_x) # shape: B, input_dim
         # x_pred = self.decoder(self.decoder_fc(sampled_x).view(-1, self.out_channels, self.H_conv, self.W_conv))
-        x_pred = self.decoder(sampled_x) # shape: B, input_dim
+        x_pred = self.decoder(sampled_x.view(-1, 512, 1, 1))
+        # x_pred = self.decoder(sampled_x.view(-1, self.n_hidden, 1, 1))
 
         # x_pred = self.decoder(self.decoder_fc(sampled_x).view(-1, 16, 16, 16))
 
@@ -319,10 +365,13 @@ class CobwebNN(nn.Module):
         means.append(parent_root)
         logvars.append(parent_logvar)
 
+        x_samples.append(sampled_x)
+
         # logtis = torch.matmul(x, parent_root.T)
         # layer_logits.append(logtis)
 
         for i, layer in enumerate(self.layers):
+            # break
             parent_root, parent_logvar = layer(parent_root, parent_logvar)
             # logtis = torch.matmul(x, parent_root.T)
             # layer_logits.append(logtis)
@@ -335,10 +384,12 @@ class CobwebNN(nn.Module):
             kl_probs = untils.GumbelSoftmax(-kl_div, tau=tau, alpha=alpha, hard=hard)
             p_node_x.append(kl_probs)
             # print(kl_probs)
-            sampled_x = self.sample(parent_root, parent_logvar) # shape: B, n_hidden
+            # sampled_x = self.sample(parent_root, parent_logvar) # shape: B, n_hidden
             # weighted combination
-            sampled_x = (kl_probs.unsqueeze(-1) * sampled_x).sum(dim=1) # shape: B, n_hidden
-            x_pred = self.decoder(sampled_x) # shape: B, input_dim
+            sampled_x = (kl_probs.unsqueeze(-1) * parent_root).sum(dim=1) # shape: B, n_hidden
+            # x_pred = self.decoder(sampled_x.view(-1, self.n_hidden, 1, 1)) # shape: B, input_dim
+            x_pred = self.decoder(sampled_x.view(-1, 512, 1, 1))
+
             # x_pred = self.decoder(self.decoder_fc(sampled_x).view(-1, self.out_channels, self.H_conv, self.W_conv))
             # x_pred = self.decoder(self.decoder_fc(sampled_x).view(-1, 16, 16, 16))
             x_preds.append(x_pred)
@@ -357,12 +408,14 @@ class CobwebNN(nn.Module):
             means.append(parent_root)
             logvars.append(parent_logvar)
 
+            x_samples.append(sampled_x)
+
             # logtis = torch.matmul(x, parent_root.T)
             # layer_logits.append(logtis)
 
 
         
-        return x, means, logvars, x_preds, p_x_nodes, p_node_x
+        return x, means, logvars, x_preds, p_x_nodes, p_node_x, x_mu, x_samples
 
             
         # loss = 0
@@ -379,6 +432,7 @@ class CobwebNN(nn.Module):
 # tiny example
 # very similiar to the prototypical network
 class TestModel(nn.Module):
+
     def __init__(self):
         super(TestModel, self).__init__()
         self.children_mean = nn.Parameter(torch.rand(8, 784))

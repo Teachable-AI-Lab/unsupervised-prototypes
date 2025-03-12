@@ -91,7 +91,8 @@ class Decoder(nn.Module):
         zero_init_residual: bool = False,
         groups: int = 1,
         width_per_group: int = 64,
-        norm_layer: Optional[Callable[..., nn.Module]] = None
+        norm_layer: Optional[Callable[..., nn.Module]] = None,
+        disable_decoder_sigmoid: bool = False,
     ) -> None:
         super().__init__()
         if norm_layer is None:
@@ -111,7 +112,7 @@ class Decoder(nn.Module):
         self.layer3 = self._make_layer(block, 256, layers[2], stride=2)
         self.layer2 = self._make_layer(block, 128, layers[1], stride=2)
         self.layer1 = self._make_layer(block, 64, layers[0], stride=1 ,output_padding = 0, last_block_dim=64)
-
+        self.disable_decoder_sigmoid = disable_decoder_sigmoid
 
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
@@ -181,7 +182,9 @@ class Decoder(nn.Module):
         x = self.unpool(x)
         x = self.de_conv1(x)
         x = self.bn1(x)
-        x = self.relu(x)
+        # x = self.relu(x)
+        if not self.disable_decoder_sigmoid:
+            x = nn.functional.sigmoid(x)
         return x
 
 
