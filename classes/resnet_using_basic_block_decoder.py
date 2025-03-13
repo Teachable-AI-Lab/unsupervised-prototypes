@@ -91,52 +91,27 @@ class Decoder(nn.Module):
         zero_init_residual: bool = False,
         groups: int = 1,
         width_per_group: int = 64,
-        norm_layer: Optional[Callable[..., nn.Module]] = None,
-        disable_decoder_sigmoid: bool = False,
+        norm_layer: Optional[Callable[..., nn.Module]] = None
     ) -> None:
         super().__init__()
         if norm_layer is None:
             norm_layer = nn.BatchNorm2d
         self._norm_layer = norm_layer
 
-        self.inplanes = 64 #64 # change from 2048 to 64. It should be the shape of the output image chanel.
+        self.inplanes = 64 # change from 2048 to 64. It should be the shape of the output image chanel.
         self.dilation = 1
         self.groups = groups
         self.base_width = width_per_group
-        self.de_conv1 = nn.ConvTranspose2d(self.inplanes, 3, kernel_size=3, stride=1, padding=1, bias=False)#, output_padding=1)
+        self.de_conv1 = nn.ConvTranspose2d(self.inplanes, 3, kernel_size=7, stride=2, padding=3, bias=False, output_padding=1)
         self.bn1 = norm_layer(3)
         self.relu = nn.ReLU(inplace=True)
-        # self.unpool = nn.Upsample(scale_factor=2, mode='bilinear') # NOTE: invert max pooling
-        
-        self.layer5 = nn.Sequential(
-            block(
-                512, 
-                512, 
-                stride=2, 
-                output_padding=1,
-                upsample=nn.Sequential(
-                    conv1x1Transposed(512, 512, 2, 1),
-                    norm_layer(512),
-                ),
-                norm_layer=norm_layer,
-            ),
-            block(
-                512, 
-                512, 
-                stride=2, 
-                output_padding=1,
-                upsample=nn.Sequential(
-                    conv1x1Transposed(512, 512, 2, 1),
-                    norm_layer(512),
-                ),
-                norm_layer=norm_layer,
-            ),
-        )
+        self.unpool = nn.Upsample(scale_factor=2, mode='bilinear') # NOTE: invert max pooling
+
         self.layer4 = self._make_layer(block, 512, layers[3], stride=2)
         self.layer3 = self._make_layer(block, 256, layers[2], stride=2)
         self.layer2 = self._make_layer(block, 128, layers[1], stride=2)
         self.layer1 = self._make_layer(block, 64, layers[0], stride=1 ,output_padding = 0, last_block_dim=64)
-        self.disable_decoder_sigmoid = disable_decoder_sigmoid
+
 
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
@@ -188,8 +163,7 @@ class Decoder(nn.Module):
 
         if stride != 1 or self.inplanes != planes * block.expansion:
             upsample = nn.Sequential(
-                # conv1x1Transposed(planes * block.expansion, last_block_dim, stride, output_padding),
-                conv3x3Transposed(planes * block.expansion, last_block_dim, stride, output_padding=1),
+                conv1x1Transposed(planes * block.expansion, last_block_dim, stride, output_padding),
                 norm_layer(last_block_dim),
             )
 
@@ -199,18 +173,15 @@ class Decoder(nn.Module):
         return nn.Sequential(*layers)
 
     def _forward_impl(self, x: Tensor) -> Tensor:
-        x = self.layer5(x)
         x = self.layer4(x)
         x = self.layer3(x)
         x = self.layer2(x)
         x = self.layer1(x)
 
-        # x = self.unpool(x)
+        x = self.unpool(x)
         x = self.de_conv1(x)
         x = self.bn1(x)
         x = self.relu(x)
-        # if not self.disable_decoder_sigmoid:
-        #     x = nn.functional.sigmoid(x)
         return x
 
 

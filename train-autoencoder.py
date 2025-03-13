@@ -123,11 +123,11 @@ for epoch in range(epochs):
             elif args.loss_fn == 'bce': # can't use this if the data is normalized
                 REC += F.binary_cross_entropy(x_pred.view(-1, image_shape_prod), data.view(-1, image_shape_prod))
             # prototype loss
-            PTY += ((x_latent.detach().unsqueeze(1) - mean.unsqueeze(0)).pow(2).mean(dim=-1) * p_node_x).sum(dim=-1).mean()
+            # PTY += ((x_latent.detach().unsqueeze(1) - mean.unsqueeze(0)).pow(2).mean(dim=-1) * p_node_x).sum(dim=-1).mean()
             # commitment loss
-            CMT += ((x_latent.unsqueeze(1) - mean.detach().unsqueeze(0)).pow(2).mean(dim=-1) * p_node_x).sum(dim=-1).mean()
+            # CMT += ((x_latent.unsqueeze(1) - mean.detach().unsqueeze(0)).pow(2).mean(dim=-1) * p_node_x).sum(dim=-1).mean()
 
-            # CMT += ((x_latent.unsqueeze(1) - mean.unsqueeze(0)).pow(2).mean(dim=-1) * p_node_x).sum(dim=-1).mean()
+            CMT += ((x_latent.unsqueeze(1) - mean.unsqueeze(0)).pow(2).mean(dim=-1) * p_node_x).sum(dim=-1).mean()
             KL += untils.cross_entropy_regularization(p_node_x, depth=n_layers - i, lambda_=args.kl_weight)
 
         loss += REC + PTY + args.commitment_weight * CMT + KL
@@ -136,7 +136,7 @@ for epoch in range(epochs):
             wandb.log({'loss': loss.item(), 
                        'rec_loss': REC.item(), 
                        'kl_loss': KL.item(), 
-                       'pty_loss': PTY.item(),
+                       'pty_loss': PTY,
                        'cmt_loss': CMT.item(),
                        'steps': steps}
                        )
@@ -151,16 +151,6 @@ for epoch in range(epochs):
         # all_kl_losses.append(KL.item())
         # all_pty_losses.append(PTY.item())
         # all_cmt_losses.append(CMT.item())
-    # for every epoch
-    viz_fig = untils.viz_examplar(cobweb, test_data, n_data=1000, device=device, layer=5, k=10, normalize=args.normalize)
-    if args.wandb:
-        wandb.log({'viz_examplar': viz_fig, 'epoch': epoch})
-
-    viz_centroids = untils.viz_examplar(cobweb, test_data, n_data=1000, device=device, layer=5, k=10, normalize=args.normalize, do_centroids=True)
-    if args.wandb:
-        wandb.log({'viz_centroids': viz_centroids, 'epoch': epoch})
-
-    
 
     # save model every 20 epochs
     if epoch % args.model_save_interval == 0:
@@ -171,6 +161,14 @@ for epoch in range(epochs):
         acc = untils.model_forzen_classification(cobweb, train_data, test_data, device=device, lr=args.linear_probing_lr, epochs=args.linear_probing_epochs, batch_size=args.batch_size)
         if args.wandb:
             wandb.log({'linear_probe_acc': acc, 'epoch': epoch})
+
+        viz_fig = untils.viz_examplar(cobweb, test_data, n_data=1000, device=device, layer=5, k=10, normalize=args.normalize)
+        if args.wandb:
+            wandb.log({'viz_examplar': viz_fig, 'epoch': epoch})
+
+        viz_centroids = untils.viz_examplar(cobweb, test_data, n_data=1000, device=device, layer=5, k=10, normalize=args.normalize, do_centroids=True)
+        if args.wandb:
+            wandb.log({'viz_centroids': viz_centroids, 'epoch': epoch})
         
         torch.save(cobweb.state_dict(), f'{model_save_path}/deep_taxon_{epoch}.pt')
         print(f'Model saved at {model_save_path}/deep_taxon_{epoch}.pt')

@@ -558,7 +558,7 @@ def viz_examplar(model, test_data, n_data=1000, device='cuda', layer=3, k=10, no
                 examplars = clusters.view(-1, model.n_hidden).to(device) # shape (n_clusters, n_hidden)
 
             # pass the examplars to the decoder
-            x_pred = model.decoder(examplars.view(-1, model.n_hidden, 1, 1)) # shape (n_clusters * k, 3, 32, 32)
+            x_pred = model.decoder(examplars.view(-1, 512, 1, 1)) # shape (n_clusters * k, 3, 32, 32)
             x_pred = x_pred.view(topk.shape[0], topk.shape[1], 3, 32, 32).detach().cpu() # shape (n_clusters, k, 3, 32, 32)
             # print(x_pred.shape)
 
@@ -566,7 +566,7 @@ def viz_examplar(model, test_data, n_data=1000, device='cuda', layer=3, k=10, no
             break
 
     # plot the examplars
-    fig, axes = plt.subplots(topk.shape[0], topk.shape[1], figsize=(8, 8),
+    fig, axes = plt.subplots(topk.shape[1], topk.shape[0], figsize=(8, 8),
                             gridspec_kw={'wspace': 0, 'hspace': 0})
     for i in range(topk.shape[0]):
         if topk.shape[1] == 1:
@@ -582,10 +582,10 @@ def viz_examplar(model, test_data, n_data=1000, device='cuda', layer=3, k=10, no
             if normalize:
                 img = x_pred[i, j].permute(1, 2, 0).numpy()
                 img = img * [0.5, 0.5, 0.5] + [0.5, 0.5, 0.5]
-                axes[i, j].imshow(img)
+                axes[j, i].imshow(img)
             else:
-                axes[i, j].imshow(x_pred[i, j].permute(1, 2, 0).numpy())
-            axes[i, j].axis('off')
+                axes[j, i].imshow(x_pred[i, j].permute(1, 2, 0).numpy())
+            axes[j, i].axis('off')
     plt.subplots_adjust(left=0, right=1, top=1, bottom=0, wspace=0, hspace=0)
     # plt.show()
     return fig
@@ -636,8 +636,9 @@ def model_forzen_classification(model, train_data, test_data, device='cuda', lr=
                 # x = F.pad(x, (2, 2, 2, 2), value=0)
                 # reper = model.encoder_fc(model.encoder(x).view(-1, model.CNN_output_dim)).detach().cpu()
             with torch.no_grad():
-                reper = model.encoder(x)#.view(-1, 512)#.detach().cpu()
-                reper = model.pre_quantization_conv(reper).view(-1, model.n_hidden)#.detach()
+                reper = model.encoder(x).view(-1, 512)#.detach().cpu()
+                # reper = model.encoder_fc(reper.view(reper.shape[0], -1)).detach().cpu() # shape (batch_size, n_hidden)
+                # reper = model.pre_quantization_conv(reper).view(-1, model.n_hidden).detach()
                 # reper = model.encoder_fc(reper.view(-1, 512))
                 # reper = model.encoder_bn(reper).detach().cpu()
 
@@ -660,8 +661,10 @@ def model_forzen_classification(model, train_data, test_data, device='cuda', lr=
         # pad to 32x32
                 # x = F.pad(x, (2, 2, 2, 2), value=0)
                 # reper = model.encoder_fc(model.encoder(x).view(-1, model.CNN_output_dim)).detach().cpu()
-                reper = model.encoder(x)#.view(-1, 512)#.detach().cpu()
-                reper = model.pre_quantization_conv(reper).view(-1, model.n_hidden).detach()
+                reper = model.encoder(x).view(-1, 512)#.detach().cpu()
+                # reper = model.pre_quantization_conv(reper).view(-1, model.n_hidden).detach()
+                # reper = model.encoder_fc(reper.view(reper.shape[0], -1)).detach().cpu() # shape (batch_size, n_hidden)
+
             logits = classifier(reper.to(device))
             labels.extend(y.tolist())
             pred.extend(logits.argmax(dim=-1).tolist())

@@ -105,41 +105,14 @@ class Encoder(nn.Module):
             )
         self.groups = groups
         self.base_width = width_per_group
-        self.conv1 = nn.Conv2d(3, self.inplanes, kernel_size=3, stride=1, padding=1, bias=False)
+        self.conv1 = nn.Conv2d(3, self.inplanes, kernel_size=7, stride=2, padding=3, bias=False)
         self.bn1 = norm_layer(self.inplanes)
         self.relu = nn.ReLU(inplace=True)
-        # self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
+        self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
         self.layer1 = self._make_layer(block, 64, layers[0])
         self.layer2 = self._make_layer(block, 128, layers[1], stride=2, dilate=replace_stride_with_dilation[0])
         self.layer3 = self._make_layer(block, 256, layers[2], stride=2, dilate=replace_stride_with_dilation[1])
-        self.layer4 = self._make_layer(block, 512, layers[3], stride=2, dilate=replace_stride_with_dilation[2]) # out shape: 512 x 4 x 4
-        # futher processing it to 512 x 1 x 1 with 5th layer
-        # self.layer5 = self._make_layer(block, 512, 2, stride=2)
-        self.layer5 = nn.Sequential(
-            # block1: 512 -> 512, stride=2
-            block(
-                512,   # inplanes
-                512,   # planes
-                stride=2,
-                downsample=nn.Sequential(
-                    conv1x1(512, 512, stride=2),
-                    norm_layer(512),
-                ),
-                norm_layer=norm_layer,
-            ),
-            # block2: 512 -> 512, stride=2
-            block(
-                512,
-                512,
-                stride=2,
-                downsample=nn.Sequential(
-                    conv1x1(512, 512, stride=2),
-                    norm_layer(512),
-                ),
-                norm_layer=norm_layer,
-            ),
-        )
-        
+        self.layer4 = self._make_layer(block, 512, layers[3], stride=2, dilate=replace_stride_with_dilation[2])
 
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
@@ -172,8 +145,7 @@ class Encoder(nn.Module):
             stride = 1
         if stride != 1 or self.inplanes != planes * block.expansion:
             downsample = nn.Sequential(
-                # conv1x1(self.inplanes, planes * block.expansion, stride),
-                conv3x3(self.inplanes, planes * block.expansion, stride),
+                conv1x1(self.inplanes, planes * block.expansion, stride),
                 norm_layer(planes * block.expansion),
             )
 
@@ -202,15 +174,16 @@ class Encoder(nn.Module):
         x = self.conv1(x)
         x = self.bn1(x)
         x = self.relu(x)
-        # x = self.maxpool(x)
+        x = self.maxpool(x)
 
         x = self.layer1(x)
         x = self.layer2(x)
         x = self.layer3(x)
         x = self.layer4(x)
-        x = self.layer5(x)
 
         return x
 
     def forward(self, x: Tensor) -> Tensor:
         return self._forward_impl(x)
+
+

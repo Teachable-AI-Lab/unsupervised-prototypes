@@ -13,6 +13,8 @@ import matplotlib.pyplot as plt
 import untils
 from encoder_decoder.resnet_encoder import Encoder, BasicBlockEnc
 from encoder_decoder.restnet_decoder import Decoder, BasicBlockDec
+from classes.resnet_using_light_basic_block_encoder import LightEncoder, LightBasicBlockEnc
+from classes.resnet_using_light_basic_block_decoder import LightDecoder, LightBasicBlockDec
 
 ## Maximize predictive prower for each node
 class CobwebNNTreeLayer(nn.Module):
@@ -56,7 +58,7 @@ class CobwebNNTreeLayer(nn.Module):
         return mean_root, logvar_root
     
 class CobwebNN(nn.Module):
-    def __init__(self, image_shape=(1,28,28), n_hidden=128, n_layers=3, disable_decoder_sigmoid=False):
+    def __init__(self, image_shape=(1,28,28), n_hidden=128, n_layers=3, disable_decoder_sigmoid=False, tau=1.0):
         super(CobwebNN, self).__init__()
         self.image_shape = image_shape
         self.n_hidden = n_hidden
@@ -96,9 +98,14 @@ class CobwebNN(nn.Module):
         self.encoder = Encoder(BasicBlockEnc, [2, 2, 2, 2])
         # self.prototype_encoder = prototype_encoder
         self.decoder = Decoder(BasicBlockDec, [2, 2, 2, 2], disable_decoder_sigmoid=disable_decoder_sigmoid)
+        # self.encoder = LightEncoder(LightBasicBlockEnc, [2, 2, 2]) 
+                # resnet 18 decoder
+        # self.decoder = LightDecoder(LightBasicBlockDec, [2, 2, 2]) 
 
         # batch norm for the encoder that transforms latent space to Gaussian space
-        self.encoder_bn = nn.BatchNorm1d(n_hidden)
+        # self.encoder_bn = nn.BatchNorm1d(n_hidden)
+
+        self.tau = tau
 
 
 
@@ -163,11 +170,14 @@ class CobwebNN(nn.Module):
 
         # self.CNN_output_dim = self.out_channels * self.H_conv * self.W_conv
 
-        self.encoder_fc = nn.Linear(512, self.n_hidden)
+        # self.encoder_fc = nn.Linear(64*8*8, self.n_hidden)
         self.pre_quantization_conv = nn.Conv2d(512, 512, kernel_size=1, stride=1)
+        # self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
+        # self.ConTrans2d = nn.ConvTranspose2d(64, 64, 8, 8)
+
         # self.encoder_fc = nn.Linear(self.H_conv * self.W_conv * self.out_channels, self.n_hidden)
 
-        self.decoder_fc = nn.Linear(self.n_hidden, 512)
+        # self.decoder_fc = nn.Linear(self.n_hidden, 64*8*8)
         # self.decoder_fc = nn.Linear(self.n_hidden, self.H_conv * self.W_conv * self.out_channels)
         # self.decoder = nn.Sequential(
         #     nn.ReLU(),
@@ -281,8 +291,21 @@ class CobwebNN(nn.Module):
         # x_mu = self.encoder_fc(self.encoder(x).view(-1, self.CNN_output_dim))
         # x_mu = F.tanh(x_mu)
         # print(x_mu.min(), x_mu.max())
-        x_mu = self.encoder(x)
-        x_mu = self.pre_quantization_conv(x_mu).view(-1, 512)
+        x_mu = self.encoder(x).view(x.size(0), -1)
+        # print(x_mu.shape)
+        # x_mu = self.pre_quantization_conv(x_mu).view(-1, 512)
+        # x_mu = self.encoder_fc(x_mu)
+        # print(x_mu.min(), x_mu.max())
+        # x_mu = self.encoder_fc(x_mu)
+        # print(x_mu.shape)
+
+        # try x with shape (B, 3, 64, 64)
+        # large_x = torch.rand(1, 3, 224, 224, device='cuda:1')
+        # x_mu = self.encoder(large_x)
+        # print(x_mu.shape)
+        
+        # x_mu = self.encoder_fc(x_mu.view(x_mu.size(0), -1)) # shape: B, n_hidden
+        # x_mu = self.pre_quantization_conv(x_mu).view(-1, 512)
         # exit()
         # leaves = self.prototype_encoder(self.prototype_noise).view(-1, self.n_hidden)
 
@@ -317,7 +340,7 @@ class CobwebNN(nn.Module):
 
         hard = False
         alpha = 0.0
-        tau = 0.05
+        # tau = 0.5
 
         # kl_div = self.kl_div(x_mu, x_logvar, parent_root, parent_logvar)
         # distance to root
@@ -326,7 +349,7 @@ class CobwebNN(nn.Module):
         kl_div = torch.norm(x_mu.unsqueeze(1) - parent_root.unsqueeze(0), p=2, dim=-1)
         # kl_div = torch.matmul(x_mu, parent_root.T) # shape: B, n_clusters
         # kl_probs = F.softmax(-kl_div, dim=-1) # shape: B, n_clusters
-        kl_probs = untils.GumbelSoftmax(-kl_div, tau=tau, alpha=alpha, hard=hard)
+        kl_probs = untils.GumbelSoftmax(-kl_div, tau=self.tau, alpha=alpha, hard=hard)
         p_node_x.append(kl_probs)
         # print(kl_probs.shape)
         # print(kl_probs)
@@ -342,6 +365,8 @@ class CobwebNN(nn.Module):
         # x_pred = self.decoder(sampled_x) # shape: B, input_dim
         # x_pred = self.decoder(self.decoder_fc(sampled_x).view(-1, self.out_channels, self.H_conv, self.W_conv))
         x_pred = self.decoder(sampled_x.view(-1, 512, 1, 1))
+        # x_pred = self.decoder(self.decoder_fc(sampled_x).view(-1, 64, 8, 8))
+        # x_pred = self.decoder(sampled_x.view(-1, 64, 8, 8))
         # x_pred = self.decoder(sampled_x.view(-1, self.n_hidden, 1, 1))
 
         # x_pred = self.decoder(self.decoder_fc(sampled_x).view(-1, 16, 16, 16))
@@ -357,7 +382,7 @@ class CobwebNN(nn.Module):
         # sampled.append(x_sampled)
 
         p_x_node = self.p_x_node(x_mu, parent_root, parent_logvar)
-        p_x_node = untils.GumbelSoftmax(p_x_node, tau=tau, alpha=alpha, hard=hard)
+        p_x_node = untils.GumbelSoftmax(p_x_node, tau=self.tau, alpha=alpha, hard=hard)
 
         p_x_nodes.append(p_x_node)
         # print(p_x_node.shape)
@@ -381,7 +406,7 @@ class CobwebNN(nn.Module):
             kl_div = torch.norm(x_mu.unsqueeze(1) - parent_root.unsqueeze(0), p=2, dim=-1)
             # kl_div = torch.matmul(x_mu, parent_root.T) # shape: B, n_clusters
             # kl_probs = F.softmax(-kl_div, dim=-1) # shape: B, n_clusters
-            kl_probs = untils.GumbelSoftmax(-kl_div, tau=tau, alpha=alpha, hard=hard)
+            kl_probs = untils.GumbelSoftmax(-kl_div, tau=self.tau, alpha=alpha, hard=hard)
             p_node_x.append(kl_probs)
             # print(kl_probs)
             # sampled_x = self.sample(parent_root, parent_logvar) # shape: B, n_hidden
@@ -389,6 +414,9 @@ class CobwebNN(nn.Module):
             sampled_x = (kl_probs.unsqueeze(-1) * parent_root).sum(dim=1) # shape: B, n_hidden
             # x_pred = self.decoder(sampled_x.view(-1, self.n_hidden, 1, 1)) # shape: B, input_dim
             x_pred = self.decoder(sampled_x.view(-1, 512, 1, 1))
+            # x_pred = self.decoder(self.decoder_fc(sampled_x).view(-1, 64, 8, 8))
+            # x_pred = self.decoder(sampled_x.view(-1, 64, 8, 8))
+
 
             # x_pred = self.decoder(self.decoder_fc(sampled_x).view(-1, self.out_channels, self.H_conv, self.W_conv))
             # x_pred = self.decoder(self.decoder_fc(sampled_x).view(-1, 16, 16, 16))
@@ -400,7 +428,7 @@ class CobwebNN(nn.Module):
 
             p_x_node = self.p_x_node(x_mu, parent_root, parent_logvar)
             # softmax this thing
-            p_x_node = untils.GumbelSoftmax(p_x_node, tau=tau, alpha=alpha, hard=hard)
+            p_x_node = untils.GumbelSoftmax(p_x_node, tau=self.tau, alpha=alpha, hard=hard)
             # p_x_node = self.p_x_node(x_mu, parent_root, parent_logvar)
             # p_x_node = p_x_node * untils.GumbelSoftmax(p_x_node, tau=tau, alpha=alpha, hard=hard)
             p_x_nodes.append(p_x_node)

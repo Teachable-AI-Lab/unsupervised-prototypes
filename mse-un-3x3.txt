@@ -3,11 +3,11 @@ wandb: Currently logged in as: ndrsn0208 (ndrsn0208-georgia-institute-of-technol
 wandb: wandb version 0.19.8 is available!  To upgrade, please run:
 wandb:  $ pip install wandb --upgrade
 wandb: Tracking run with wandb version 0.17.5
-wandb: Run data is saved locally in /home/zwang910/Research/unsupervised-prototypes/wandb/run-20250313_122252-jopiqmde
+wandb: Run data is saved locally in /home/zwang910/Research/unsupervised-prototypes/wandb/run-20250313_122420-xcsw80wz
 wandb: Run `wandb offline` to turn off syncing.
-wandb: Syncing run mse-unnormalized
+wandb: Syncing run mse-unnormalized-3x3
 wandb: ⭐️ View project at https://wandb.ai/ndrsn0208-georgia-institute-of-technology/deep-taxon
-wandb: 🚀 View run at https://wandb.ai/ndrsn0208-georgia-institute-of-technology/deep-taxon/runs/jopiqmde
+wandb: 🚀 View run at https://wandb.ai/ndrsn0208-georgia-institute-of-technology/deep-taxon/runs/xcsw80wz
 False
 Loading data...
 Start training...
