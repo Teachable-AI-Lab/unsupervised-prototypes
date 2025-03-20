@@ -188,8 +188,8 @@ class Decoder(nn.Module):
 
         if stride != 1 or self.inplanes != planes * block.expansion:
             upsample = nn.Sequential(
-                # conv1x1Transposed(planes * block.expansion, last_block_dim, stride, output_padding),
-                conv3x3Transposed(planes * block.expansion, last_block_dim, stride, output_padding=1),
+                conv1x1Transposed(planes * block.expansion, last_block_dim, stride, output_padding),
+                # conv3x3Transposed(planes * block.expansion, last_block_dim, stride, output_padding=1),
                 norm_layer(last_block_dim),
             )
 

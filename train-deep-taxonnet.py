@@ -14,7 +14,7 @@ import matplotlib.pyplot as plt
 from sklearn.manifold import TSNE
 from sklearn.decomposition import PCA
 import untils
-from COBWEBNN import CobwebNN, CobwebNNTreeLayer, TestModel
+from DeepTaxonNet import CobwebNN, CobwebNNTreeLayer, TestModel
 import argparse
 import os
 import sys
@@ -50,7 +50,9 @@ parser.add_argument('--n_hidden', type=int, default=512)
 parser.add_argument('--kl_weight', type=float, default=200.0)
 parser.add_argument('--tau', type=float, default=1.0)
 parser.add_argument('--commitment_weight', type=float, default=1.0)
-parser.add_argument('--loss_fn', type=str, default='mse') # or bce
+parser.add_argument('--loss_fn', type=str, default='mse') # or bce # We use MSE
+parser.add_argument('--layer_wise_loss', type=bool, default=False)
+parser.add_argument('--sampling', type=bool, default=False)
 ## Data args
 parser.add_argument('--dataset', type=str, default='cifar-10')
 parser.add_argument('--normalize', type=bool, default=False)
@@ -70,7 +72,7 @@ if args.wandb:
     wandb.config.update(args)
 
 print(args.normalize)
-
+print(f"layer_wise_loss: {args.layer_wise_loss}")
 #######################################################
 
 # define data loader
@@ -83,7 +85,8 @@ n_hidden = args.n_hidden
 image_shape = (3, 32, 32)
 image_shape_prod = image_shape[0] * image_shape[1] * image_shape[2]
 cobweb = CobwebNN(image_shape=image_shape, n_layers=n_layers, n_hidden=n_hidden,
-                  disable_decoder_sigmoid=args.normalize, tau=args.tau,
+                  disable_decoder_sigmoid=args.normalize, tau=args.tau, 
+                  layer_wise=args.layer_wise_loss, sampling=args.sampling,
                   ).to(device)
 
 # # print model's device
@@ -91,12 +94,6 @@ cobweb = CobwebNN(image_shape=image_shape, n_layers=n_layers, n_hidden=n_hidden,
 
 # define optimizer
 optimizer = optim.AdamW(cobweb.parameters(), lr=args.lr)
-
-# all_losses = []
-# all_rec_losses = []
-# all_kl_losses = []
-# all_pty_losses = []
-# all_cmt_losses = []
 
 print('Start training...')
 steps = 0
@@ -116,27 +113,53 @@ for epoch in range(epochs):
         KL = 0
         # break
         H = 0
-        for i, (mean, logvar, x_pred, p_x_node, p_node_x) in enumerate(zip(means, logvars, x_preds, p_x_nodes, p_node_xs)):
+
+        ########### layer-wise loss ############
+        if args.layer_wise_loss:
+            # print(len(means), len(logvars), len(x_preds), len(p_x_nodes), len(p_node_xs))
+            for i, (mean, logvar, x_pred, p_node_x) in enumerate(zip(means, logvars, x_preds, p_node_xs)):
+                # reconstruction loss
+                if args.loss_fn == 'mse':
+                    REC += F.mse_loss(x_pred.view(-1, image_shape_prod), data.view(-1, image_shape_prod))
+                elif args.loss_fn == 'bce': # can't use this if the data is normalized
+                    REC += F.binary_cross_entropy(x_pred.view(-1, image_shape_prod), data.view(-1, image_shape_prod))
+                # prototype loss
+                # PTY += ((x_latent.detach().unsqueeze(1) - mean.unsqueeze(0)).pow(2).mean(dim=-1) * p_node_x).sum(dim=-1).mean()
+                # commitment loss
+                # CMT += ((x_latent.unsqueeze(1) - mean.detach().unsqueeze(0)).pow(2).mean(dim=-1) * p_node_x).sum(dim=-1).mean()
+                CMT += ((x_latent.unsqueeze(1) - mean.unsqueeze(0)).pow(2).mean(dim=-1) * p_node_x).sum(dim=-1).mean()
+                KL += untils.cross_entropy_regularization(p_node_x, depth=n_layers - i, lambda_=args.kl_weight)
+                # print(f"layer {i}: KL: {KL}")
+
+            loss += REC + args.commitment_weight * CMT + KL
+
+        ########### tree-wise loss ############
+        else:
+            # means: 2**n_layers-1, n_hidden
+            # logvars: 2**n_layers-1, n_hidden
+            # x_preds: B, 512, 1, 1
+            # p_node_xs: B, 2**n_layers-1
             # reconstruction loss
             if args.loss_fn == 'mse':
-                REC += F.mse_loss(x_pred.view(-1, image_shape_prod), data.view(-1, image_shape_prod))
+                REC = F.mse_loss(x_preds.view(-1, image_shape_prod), data.view(-1, image_shape_prod))
             elif args.loss_fn == 'bce': # can't use this if the data is normalized
-                REC += F.binary_cross_entropy(x_pred.view(-1, image_shape_prod), data.view(-1, image_shape_prod))
+                REC = F.binary_cross_entropy(x_preds.view(-1, image_shape_prod), data.view(-1, image_shape_prod))
             # prototype loss
-            PTY += ((x_latent.detach().unsqueeze(1) - mean.unsqueeze(0)).pow(2).mean(dim=-1) * p_node_x).sum(dim=-1).mean()
+            # PTY = ((x_latent.detach().unsqueeze(1) - torch.cat(means, dim=0).unsqueeze(0)).pow(2).mean(dim=-1) * p_node_xs).sum(dim=-1).mean()
             # commitment loss
-            CMT += ((x_latent.unsqueeze(1) - mean.detach().unsqueeze(0)).pow(2).mean(dim=-1) * p_node_x).sum(dim=-1).mean()
-
-            # CMT += ((x_latent.unsqueeze(1) - mean.unsqueeze(0)).pow(2).mean(dim=-1) * p_node_x).sum(dim=-1).mean()
-            KL += untils.cross_entropy_regularization(p_node_x, depth=n_layers - i, lambda_=args.kl_weight)
-
-        loss += REC + PTY + args.commitment_weight * CMT + KL
+            # CMT = ((x_latent.unsqueeze(1) - torch.cat(means, dim=0).detach().unsqueeze(0)).pow(2).mean(dim=-1) * p_node_xs).sum(dim=-1).mean()
+            CMT += ((x_latent.unsqueeze(1) - torch.cat(means, dim=0).unsqueeze(0)).pow(2).mean(dim=-1) * p_node_xs).sum(dim=-1).mean()
+            KL = untils.cross_entropy_regularization(p_node_xs, depth=n_layers + 1, lambda_=args.kl_weight, entire_tree=(not args.layer_wise_loss))
+            # print(f"KL: {KL}")
+            loss = REC + args.commitment_weight * CMT + KL
+            # print(p_node_xs.shape)
+            # print(torch.cat(means, dim=0).shape)
 
         if args.wandb:
             wandb.log({'loss': loss.item(), 
                        'rec_loss': REC.item(), 
                        'kl_loss': KL.item(), 
-                       'pty_loss': PTY.item(),
+                       'pty_loss': PTY,
                        'cmt_loss': CMT.item(),
                        'steps': steps}
                        )

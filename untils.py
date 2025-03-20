@@ -165,7 +165,7 @@ def entropy_regularization(left_prob, eps=1e-8, lambda_=1, layer=0):
     entropy = - (left_prob * torch.log(left_prob + eps) + (1 - left_prob) * torch.log(1 - left_prob + eps))
     return entropy * lambda_
 
-def cross_entropy_regularization(path_probs, depth=0, eps=1e-8, lambda_=1, n_layers=3, decay=False):
+def cross_entropy_regularization(path_probs, depth=0, eps=1e-8, lambda_=1, n_layers=3, decay=False, entire_tree=False):
     # path_probs: [batch, 2 * n_clusters]
     assert path_probs.sum(dim=-1).allclose(torch.ones(path_probs.shape[0], device=path_probs.device))
     B = path_probs.shape[0]
@@ -173,8 +173,15 @@ def cross_entropy_regularization(path_probs, depth=0, eps=1e-8, lambda_=1, n_lay
     pp = path_probs.sum(dim=0) / B
     # print(pp)
     a = F.softmax(pp, dim=-1)
+    print(a.shape)
     # print(path_probs.view(B, -1, 2).sum(dim=0), a)
-    equ = 1 / 2 ** (depth)
+    # equ = 1 / 2 ** (depth)
+    equ = -torch.log(torch.tensor(2**(depth), device=path_probs.device))
+    if entire_tree:
+        # equ = 1 / (2 ** depth - 1)
+        equ = -torch.log(torch.tensor(2**(depth) - 1, device=path_probs.device))
+
+    # print(f"nodes: {2 ** depth - 1}, equ: {equ**-1}, nodes: {path_probs.shape[1]}")
     # print(f"equ: {equ}")
     # repeat equ to the shape of a
     equ = torch.tensor([equ] * a.shape[0], device=path_probs.device)
@@ -183,7 +190,10 @@ def cross_entropy_regularization(path_probs, depth=0, eps=1e-8, lambda_=1, n_lay
     # reg = (0.5 * torch.log(a)).sum()
     # kl between a and equ
 
-    reg = F.kl_div(a.log(), equ, reduction='sum')
+    # reg = F.kl_div(a.log(), equ, reduction='sum')
+    # log kl
+    reg = (a * (a.log() - equ)).sum()
+    reg = torch.max(reg, torch.tensor(0, dtype=torch.float32, device=path_probs.device))
     if decay:
         lambda_ = lambda_ * torch.log(-torch.tensor(depth - (n_layers + 1), dtype=torch.float32, device=path_probs.device))
 
@@ -449,25 +459,25 @@ def viz_clusters(model, test_data, device='cuda', n_data=1000):
 
             x, means, logvars, x_preds, p_x_nodes, p_node_xs, x_latent, x_samples = model(input_x.to(device))
             # print(p_node_xs[0].shape)
-            print(torch.argmax(p_node_xs[0], dim=-1))
+            # print(torch.argmax(p_node_xs[0], dim=-1))
             # break
 
             # input_x = input_x.expand(-1, 3, -1, -1)
         # pad to 32x32
             # input_x = F.pad(input_x, (2, 2, 2, 2), value=0)
-            conved = model.encoder(input_x.to(device))
-            latent = model.pre_quantization_conv(conved).view(-1, 512).detach().cpu()
-
-            latent = x_samples[0].detach().cpu()
+            # conved = model.encoder(input_x.to(device)).view(-1, 512).detach().cpu()
+            # latent = model.pre_quantization_conv(conved).view(-1, 512).detach().cpu()
+            # print(x_samples[0].shape)
+            latent = x_samples.detach().cpu()
             # print(conved.shape)
             # latent = model.encoder_fc(conved.view(batch_size, -1))
             # latent = model.encoder_bn(latent).detach().cpu()
             # latent = F.tanh(latent)
             print(latent.min(), latent.max())
             print(model.leaves.min(), model.leaves.max())
-            print(f"alpha: {F.sigmoid(model.layers[0].cluster_weight)}")
+            # print(f"alpha: {F.sigmoid(model.layers[0].cluster_weight)}")
             # print(model.prototype_encoder(model.prototype_noise).min(), model.prototype_encoder(model.prototype_noise).max())
-            print(latent.shape)
+            # print(latent.shape)
             all_representations.append(latent)
             all_labels.append(input_y)
             prototypes1 = means[-1].detach().cpu()

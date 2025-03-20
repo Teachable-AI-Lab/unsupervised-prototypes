@@ -172,8 +172,8 @@ class Encoder(nn.Module):
             stride = 1
         if stride != 1 or self.inplanes != planes * block.expansion:
             downsample = nn.Sequential(
-                # conv1x1(self.inplanes, planes * block.expansion, stride),
-                conv3x3(self.inplanes, planes * block.expansion, stride),
+                conv1x1(self.inplanes, planes * block.expansion, stride),
+                # conv3x3(self.inplanes, planes * block.expansion, stride),
                 norm_layer(planes * block.expansion),
             )
 
