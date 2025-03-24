@@ -53,6 +53,7 @@ parser.add_argument('--commitment_weight', type=float, default=1.0)
 parser.add_argument('--loss_fn', type=str, default='mse') # or bce # We use MSE
 parser.add_argument('--layer_wise_loss', type=bool, default=False)
 parser.add_argument('--sampling', type=bool, default=False)
+parser.add_argument('--simple_encoder', type=bool, default=False)
 ## Data args
 parser.add_argument('--dataset', type=str, default='cifar-10')
 parser.add_argument('--normalize', type=bool, default=False)
@@ -86,7 +87,7 @@ image_shape = (3, 32, 32)
 image_shape_prod = image_shape[0] * image_shape[1] * image_shape[2]
 cobweb = CobwebNN(image_shape=image_shape, n_layers=n_layers, n_hidden=n_hidden,
                   disable_decoder_sigmoid=args.normalize, tau=args.tau, 
-                  layer_wise=args.layer_wise_loss, sampling=args.sampling,
+                  layer_wise=args.layer_wise_loss, sampling=args.sampling, simple_encoder=args.simple_encoder
                   ).to(device)
 
 # # print model's device
@@ -127,7 +128,12 @@ for epoch in range(epochs):
                 # PTY += ((x_latent.detach().unsqueeze(1) - mean.unsqueeze(0)).pow(2).mean(dim=-1) * p_node_x).sum(dim=-1).mean()
                 # commitment loss
                 # CMT += ((x_latent.unsqueeze(1) - mean.detach().unsqueeze(0)).pow(2).mean(dim=-1) * p_node_x).sum(dim=-1).mean()
-                CMT += ((x_latent.unsqueeze(1) - mean.unsqueeze(0)).pow(2).mean(dim=-1) * p_node_x).sum(dim=-1).mean()
+                if args.sampling:
+                    # maximize the logprob of x_latent given the means and logvars
+                    #  dist = -0.5 * torch.sum(logvars_cat + ((x_mu.unsqueeze(1) - means_cat.unsqueeze(0)) ** 2) / torch.exp(logvars_cat), dim=-1)
+                    CMT += 0.5 * torch.sum(logvar + ((x_latent.unsqueeze(1) - mean.unsqueeze(0)) ** 2) / torch.exp(logvar), dim=-1).mean()
+                else:
+                    CMT += ((x_latent.unsqueeze(1) - mean.unsqueeze(0)).pow(2).mean(dim=-1) * p_node_x).sum(dim=-1).mean()
                 KL += untils.cross_entropy_regularization(p_node_x, depth=n_layers - i, lambda_=args.kl_weight)
                 # print(f"layer {i}: KL: {KL}")
 
@@ -148,7 +154,12 @@ for epoch in range(epochs):
             # PTY = ((x_latent.detach().unsqueeze(1) - torch.cat(means, dim=0).unsqueeze(0)).pow(2).mean(dim=-1) * p_node_xs).sum(dim=-1).mean()
             # commitment loss
             # CMT = ((x_latent.unsqueeze(1) - torch.cat(means, dim=0).detach().unsqueeze(0)).pow(2).mean(dim=-1) * p_node_xs).sum(dim=-1).mean()
-            CMT += ((x_latent.unsqueeze(1) - torch.cat(means, dim=0).unsqueeze(0)).pow(2).mean(dim=-1) * p_node_xs).sum(dim=-1).mean()
+            if args.sampling:
+                # maximize the logprob of x_latent given the means and logvars
+                #  dist = -0.5 * torch.sum(logvars_cat + ((x_mu.unsqueeze(1) - means_cat.unsqueeze(0)) ** 2) / torch.exp(logvars_cat), dim=-1)
+                CMT += 0.5 * torch.sum(logvars + ((x_latent.unsqueeze(1) - torch.cat(means, dim=0).unsqueeze(0)) ** 2) / torch.exp(logvars), dim=-1).mean()
+            else:
+                CMT += ((x_latent.unsqueeze(1) - torch.cat(means, dim=0).unsqueeze(0)).pow(2).mean(dim=-1) * p_node_xs).sum(dim=-1).mean()
             KL = untils.cross_entropy_regularization(p_node_xs, depth=n_layers + 1, lambda_=args.kl_weight, entire_tree=(not args.layer_wise_loss))
             # print(f"KL: {KL}")
             loss = REC + args.commitment_weight * CMT + KL

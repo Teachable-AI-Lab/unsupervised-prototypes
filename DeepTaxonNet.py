@@ -58,7 +58,15 @@ class CobwebNNTreeLayer(nn.Module):
         return mean_root, logvar_root
     
 class CobwebNN(nn.Module):
-    def __init__(self, image_shape=(1,28,28), n_hidden=128, n_layers=3, disable_decoder_sigmoid=False, tau=1.0, sampling=False, layer_wise=False):
+    def __init__(self, 
+                 image_shape=(1,28,28), 
+                 n_hidden=128, 
+                 n_layers=3, 
+                 disable_decoder_sigmoid=False, 
+                 tau=1.0, 
+                 sampling=False, 
+                 layer_wise=False,
+                 simple_encoder=False):
         super(CobwebNN, self).__init__()
         self.image_shape = image_shape
         self.n_hidden = n_hidden
@@ -87,6 +95,29 @@ class CobwebNN(nn.Module):
         self.encoder = Encoder(BasicBlockEnc, [2, 2, 2, 2])
         # self.prototype_encoder = prototype_encoder
         self.decoder = Decoder(BasicBlockDec, [2, 2, 2, 2], disable_decoder_sigmoid=disable_decoder_sigmoid)
+
+        if simple_encoder:
+            # 
+            self.encoder = nn.Sequential(
+                # flatten the input
+                nn.Flatten(),
+                nn.Linear(self.image_shape[0] * self.image_shape[1] * self.image_shape[2], 784),
+                nn.ReLU(),
+                nn.Linear(784, 512),
+                nn.ReLU(),
+                nn.Linear(512, self.n_hidden),
+                nn.ReLU()
+            )
+            self.decoder = nn.Sequential(
+                nn.Linear(self.n_hidden, 512),
+                nn.ReLU(),
+                nn.Linear(512, 784),
+                nn.ReLU(),
+                nn.Linear(784, self.image_shape[0] * self.image_shape[1] * self.image_shape[2]),
+                nn.Sigmoid(),
+                # reshape the output
+                nn.Unflatten(-1, self.image_shape)
+            )
 
         self.tau = tau
 
@@ -128,8 +159,14 @@ class CobwebNN(nn.Module):
         logvars_cat = torch.cat(logvars, dim=0) # shape: 2**n_layers-1, n_hidden
 
         # distance
-        dist = torch.norm(x_mu.unsqueeze(1) - means_cat.unsqueeze(0), p=2, dim=-1) # shape: B, 2**n_layers-1
-        dist_probs = untils.GumbelSoftmax(-dist, tau=self.tau, alpha=alpha, hard=hard) # shape: B, 2**n_layers-1
+        if self.sampling:
+            # calculate the log probabilities of x given the nodes
+            dist = -0.5 * torch.sum(logvars_cat + ((x_mu.unsqueeze(1) - means_cat.unsqueeze(0)) ** 2) / torch.exp(logvars_cat), dim=-1)
+        else:
+            dist = -torch.norm(x_mu.unsqueeze(1) - means_cat.unsqueeze(0), p=2, dim=-1) # shape: B, 2**n_layers-1
+        # if sampling, then I'm calculating the probabilities x given the nodes
+        
+        dist_probs = untils.GumbelSoftmax(dist, tau=self.tau, alpha=alpha, hard=hard) # shape: B, 2**n_layers-1
         p_node_x = dist_probs
 
         sampled_x = means_cat
@@ -161,8 +198,11 @@ class CobwebNN(nn.Module):
         ###### LAYER-WISE ######
         # distance to root
         # Eucledian distance
-        dist = torch.norm(x_mu.unsqueeze(1) - parent_root.unsqueeze(0), p=2, dim=-1)
-        dist_probs = untils.GumbelSoftmax(-dist, tau=self.tau, alpha=alpha, hard=hard)
+        if self.sampling:
+            dist = -0.5 * torch.sum(parent_logvar + ((x_mu.unsqueeze(1) - parent_root.unsqueeze(0)) ** 2) / torch.exp(parent_logvar), dim=-1)
+        else:
+            dist = -torch.norm(x_mu.unsqueeze(1) - parent_root.unsqueeze(0), p=2, dim=-1)
+        dist_probs = untils.GumbelSoftmax(dist, tau=self.tau, alpha=alpha, hard=hard)
         p_node_x.append(dist_probs)
 
         sampled_x = parent_root
@@ -180,8 +220,11 @@ class CobwebNN(nn.Module):
         for i, layer in enumerate(self.layers):
             parent_root, parent_logvar = layer(parent_root, parent_logvar)
 
-            dist = torch.norm(x_mu.unsqueeze(1) - parent_root.unsqueeze(0), p=2, dim=-1)
-            dist_probs = untils.GumbelSoftmax(-dist, tau=self.tau, alpha=alpha, hard=hard)
+            if self.sampling:
+                dist = -0.5 * torch.sum(parent_logvar + ((x_mu.unsqueeze(1) - parent_root.unsqueeze(0)) ** 2) / torch.exp(parent_logvar), dim=-1)
+            else:
+                dist = -torch.norm(x_mu.unsqueeze(1) - parent_root.unsqueeze(0), p=2, dim=-1)
+            dist_probs = untils.GumbelSoftmax(dist, tau=self.tau, alpha=alpha, hard=hard)
             p_node_x.append(dist_probs)
             
             sampled_x = parent_root
