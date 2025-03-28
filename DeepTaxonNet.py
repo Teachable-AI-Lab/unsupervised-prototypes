@@ -13,8 +13,6 @@ import matplotlib.pyplot as plt
 import untils
 from encoder_decoder.resnet_encoder import Encoder, BasicBlockEnc
 from encoder_decoder.restnet_decoder import Decoder, BasicBlockDec
-from classes.resnet_using_light_basic_block_encoder import LightEncoder, LightBasicBlockEnc
-from classes.resnet_using_light_basic_block_decoder import LightDecoder, LightBasicBlockDec
 
 ## Maximize predictive prower for each node
 class CobwebNNTreeLayer(nn.Module):

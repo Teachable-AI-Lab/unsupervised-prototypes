@@ -1,7 +1,27 @@
-## Installation
-- Install the `cmake-build` branch at [Cobweb](https://github.com/Teachable-AI-Lab/cobweb/tree/cmake-build)
+# Deep Taxonomic Networks for Unsupervised Prototype Discovery
+![dtn](./repo_images/dtn.drawio-1.png)
 
 ## How to use
+
+The `scripts` folder contains shell commands for training Deep Taxonomic Network model.
+
+The `encoder-decoder` folder contains several autoencoder architectures for experiments
+
+`MiniDeepTaxonNet.py` is the same model but with vanilla autoencoder model such as simple CNN or simple MLP for the proof of concept experiments.
+
+`train-autoencoder.py` and `train-deep-taxonnet.py` are the main training loops. The former one trains the autoencoder baseline model.
+
+`DTN-basic-node-eval.ipynb` contains the main basic-level node probing evaluation logic:
+![eval](./repo_images/dtn-eval.drawio-1.png)
+
+
+## How to use (Symbolic model)
+
+### Installation
+- Install the `cmake-build` branch at [Cobweb](https://github.com/Teachable-AI-Lab/cobweb/tree/cmake-build)
+
+***Moved to `cobweb_symbolic` folder***
+
 `cobweb_symbolic.py` contains a wrapper class so you can have the cobweb tree in python.
 See `cobweb-sym-example.ipynb`
 
@@ -14,7 +34,7 @@ The cobweb symbolic tree comes with a hyper-parameter `depth`. If you set the `d
 
 `COBWEBNN.py` contains the current version of the CobwebNN model
 
-## Visualization
+### Visualization
 We use `D3.js` for visualization. **Line 55** of the `tree_viz.html` contains the JSON file name that we wish to visualize. Once a visualization JSON file is created, make sure you update the file name at **line 55**.
 
 To run the HTML, go to your working directory, open terminal and run `python -m http.server 8080` (either `python` or `python3` is fine, depending on your environment. And if port 8080 is in use, you can use different port number).

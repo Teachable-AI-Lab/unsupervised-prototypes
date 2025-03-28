@@ -173,7 +173,7 @@ def cross_entropy_regularization(path_probs, depth=0, eps=1e-8, lambda_=1, n_lay
     pp = path_probs.sum(dim=0) / B
     # print(pp)
     a = F.softmax(pp, dim=-1)
-    print(a.shape)
+    # print(a.shape)
     # print(path_probs.view(B, -1, 2).sum(dim=0), a)
     # equ = 1 / 2 ** (depth)
     equ = -torch.log(torch.tensor(2**(depth), device=path_probs.device))
@@ -697,7 +697,7 @@ def model_forzen_classification(model, train_data, test_data, device='cuda', lr=
 def get_data_loader(dataset, batch_size, normalize):
     if dataset == 'cifar-10':
         # load CIFAR10
-        download = False
+        download = True
         dataset_class = datasets.CIFAR10
         if normalize:
             cifar10_transform = transforms.Compose([
