@@ -18,7 +18,7 @@ The `encoder-decoder` folder contains several autoencoder architectures for expe
 ## How to use (Symbolic model)
 
 ### Installation
-- Install the `cmake-build` branch at [Cobweb](https://github.com/Teachable-AI-Lab/cobweb/tree/cmake-build)
+- Install the `cmake-build` branch at [Cobweb](https://github.com/Teachable-AI-Lab/cobweb/tree/cmake-build) 
 
 ***Moved to `cobweb_symbolic` folder***
 
