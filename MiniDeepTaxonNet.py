@@ -158,6 +158,8 @@ class CobwebNN(nn.Module):
         else:
             dist = -torch.norm(x_mu.unsqueeze(1) - means_cat.unsqueeze(0), p=2, dim=-1) # shape: B, 2**n_layers-1
         # if sampling, then I'm calculating the probabilities x given the nodes
+
+        # need to test sampling, contranstive loss, etc...
         
         dist_probs = untils.GumbelSoftmax(dist, tau=self.tau, alpha=alpha, hard=hard) # shape: B, 2**n_layers-1
         p_node_x = dist_probs
