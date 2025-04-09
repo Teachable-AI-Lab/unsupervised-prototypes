@@ -181,6 +181,7 @@ def cross_entropy_regularization(path_probs, depth=0, eps=1e-8, lambda_=1, n_lay
         # equ = 1 / (2 ** depth - 1)
         equ = -torch.log(torch.tensor(2**(depth) - 1, device=path_probs.device))
 
+    # print(f"Cross entropy regularization at depth {depth}: {equ}")
     # print(f"nodes: {2 ** depth - 1}, equ: {equ**-1}, nodes: {path_probs.shape[1]}")
     # print(f"equ: {equ}")
     # repeat equ to the shape of a
@@ -718,3 +719,52 @@ def get_data_loader(dataset, batch_size, normalize):
         cifar10_test_loader = DataLoader(cifar10_test, batch_size=batch_size*2, shuffle=True, num_workers=4, pin_memory=True)
 
         return cifar10_train_loader, cifar10_test_loader, cifar10_train, cifar10_test
+    
+# custom MNIST dataset that returns 
+# import torchvision.transforms.functional as F
+import random
+
+def random_transform(img):
+    """
+    Apply a random transformation to a single image tensor.
+    Available transformations: rotation, shear, scale, translate, horizontal flip, contrast, brightness.
+    """
+    # Choose a random transformation
+    transform_type = random.choice([
+        'rotate', 'shear', 'scale', 'translate', 
+        'hflip', 'contrast', 'brightness'
+    ])
+    
+    if transform_type == 'rotate':
+        # Random rotation between -15 and 15 degrees.
+        angle = random.uniform(-15, 15)
+        img_t = transforms.functional.affine(img, angle=angle, translate=(0, 0), scale=1, shear=0)
+    elif transform_type == 'shear':
+        # Random shear between -10 and 10 degrees.
+        shear_val = random.uniform(-10, 10)
+        img_t = transforms.functional.affine(img, angle=0, translate=(0, 0), scale=1, shear=shear_val)
+    elif transform_type == 'scale':
+        # Random scaling between 0.9 and 1.1.
+        scale_factor = random.uniform(0.9, 1.1)
+        img_t = transforms.functional.affine(img, angle=0, translate=(0, 0), scale=scale_factor, shear=0)
+    elif transform_type == 'translate':
+        # Random translation by up to 3 pixels in x and y directions (MNIST images are 28x28).
+        max_translate = 3
+        tx = random.uniform(-max_translate, max_translate)
+        ty = random.uniform(-max_translate, max_translate)
+        img_t = transforms.functional.affine(img, angle=0, translate=(int(tx), int(ty)), scale=1, shear=0)
+    elif transform_type == 'hflip':
+        # Random horizontal flip.
+        img_t = transforms.functional.hflip(img) if random.random() < 0.5 else img
+    elif transform_type == 'contrast':
+        # Adjust contrast with a random factor between 0.8 and 1.2.
+        contrast_factor = random.uniform(0.8, 1.2)
+        img_t = transforms.functional.adjust_contrast(img, contrast_factor)
+    elif transform_type == 'brightness':
+        # Adjust brightness with a random factor between 0.8 and 1.2.
+        brightness_factor = random.uniform(0.8, 1.2)
+        img_t = transforms.functional.adjust_brightness(img, brightness_factor)
+    else:
+        img_t = img  # fallback: no transformation
+
+    return img_t

@@ -13,8 +13,8 @@ import matplotlib.pyplot as plt
 import untils
 from encoder_decoder.resnet_encoder import Encoder, BasicBlockEnc
 from encoder_decoder.restnet_decoder import Decoder, BasicBlockDec
-from classes.resnet_using_light_basic_block_encoder import LightEncoder, LightBasicBlockEnc
-from classes.resnet_using_light_basic_block_decoder import LightDecoder, LightBasicBlockDec
+from encoder_decoder.resnet_using_light_basic_block_encoder import LightEncoder, LightBasicBlockEnc
+from encoder_decoder.resnet_using_light_basic_block_decoder import LightDecoder, LightBasicBlockDec
 
 ## Maximize predictive prower for each node
 class CobwebNNTreeLayer(nn.Module):
@@ -98,19 +98,47 @@ class CobwebNN(nn.Module):
         self.decoder = Decoder(BasicBlockDec, [2, 2, 2, 2], disable_decoder_sigmoid=disable_decoder_sigmoid)
 
         if simple_encoder:
-            # 
-            self.encoder = nn.Sequential(
-                nn.Linear(input_dim, 16),
+            self.encoder = LightEncoder(LightBasicBlockEnc, [2, 2, 2]) 
+            # projection_dim = 32
+            self.projection = nn.Sequential(
+                nn.Flatten(),
+                nn.Linear(64*7*7, 512),
                 nn.ReLU(),
-                nn.Linear(16, self.n_hidden),
+                nn.Linear(512, self.n_hidden),
                 # nn.ReLU()
             )
+
             self.decoder = nn.Sequential(
-                nn.Linear(self.n_hidden, 16),
+                nn.Linear(self.n_hidden, 512),
                 nn.ReLU(),
-                nn.Linear(16, input_dim),
-                nn.ReLU()
+                nn.Linear(512, 64*7*7),
+                nn.Unflatten(1, (64, 7, 7)),
+                LightDecoder(LightBasicBlockDec, [2, 2, 2]),
             )
+
+
+            # 
+            # self.encoder = nn.Sequential(
+            #     nn.Linear(input_dim, 128),
+            #     nn.ReLU(),
+            #     nn.Linear(128, 64),
+            #     nn.ReLU(),
+            #     nn.Linear(64, n_hidden),
+            #     # laynorm
+            #     # nn.LayerNorm(n_hidden),
+            #     # nn.ReLU()
+            # )
+
+            # self.projection = nn.Linear(n_hidden, n_hidden)
+
+            # self.decoder = nn.Sequential(
+            #     nn.Linear(n_hidden, 64),
+            #     nn.ReLU(),
+            #     nn.Linear(64, 128),
+            #     nn.ReLU(),
+            #     nn.Linear(128, input_dim),
+            #     nn.Sigmoid()
+            # )
 
         self.tau = tau
 
@@ -125,10 +153,18 @@ class CobwebNN(nn.Module):
         return mean + eps * std
     
     def tree_wise_forward(self, x, y=None, hard=None):
+        # print(self.sampling)
+        # x = x.view(-1, 28*28)
         x_mu = self.encoder(x)#.view(x.size(0), -1)
+        x_mu = self.projection(x_mu)
+        # x_mu = self.projection(x_mu)
 
         parent_root = self.leaves # shape: n_clusters, n_hidden
         parent_logvar = self.leaves_logvar
+
+        # normalize
+        # x_mu = F.normalize(x_mu, p=2, dim=-1)
+        # parent_root = F.normalize(parent_root, p=2, dim=-1)
 
         means = []
         logvars = []
@@ -137,22 +173,25 @@ class CobwebNN(nn.Module):
         means.append(parent_root)
         logvars.append(parent_logvar)
 
-        hard = True
-        alpha = 1
+        hard = False
+        alpha = 0.00
 
-        ###### TREE-WISE ######
-        # for i, layer in enumerate(self.layers):
-        #     parent_root, parent_logvar = layer(parent_root, parent_logvar)
+        # ###### TREE-WISE ######
+        for i, layer in enumerate(self.layers):
+            parent_root, parent_logvar = layer(parent_root, parent_logvar)
 
-        #     means.append(parent_root)
-        #     logvars.append(parent_logvar)
+            # normalize
+            # parent_root = F.normalize(parent_root, p=2, dim=-1)
+
+            means.append(parent_root)
+            logvars.append(parent_logvar)
 
         # now I collect the means and logvars of entire tree
         means_cat = torch.cat(means, dim=0) # shape: 2**n_layers-1, n_hidden
         logvars_cat = torch.cat(logvars, dim=0) # shape: 2**n_layers-1, n_hidden
 
         # distance
-        if self.sampling:
+        if False:
             # calculate the log probabilities of x given the nodes
             dist = -0.5 * torch.sum(logvars_cat + ((x_mu.unsqueeze(1) - means_cat.unsqueeze(0)) ** 2) / torch.exp(logvars_cat), dim=-1)
         else:
@@ -174,7 +213,7 @@ class CobwebNN(nn.Module):
         return x, means, logvars, x_pred, p_x_nodes, p_node_x, x_mu, sampled_x
     
     def layer_wise_forward(self, x, y=None, hard=None):
-
+        # print(self.sampling)
         x_mu = self.encoder(x).view(x.size(0), -1)
         
         parent_root = self.leaves
