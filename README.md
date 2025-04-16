@@ -5,11 +5,16 @@
 
 The `scripts` folder contains shell commands for training Deep Taxonomic Network model.
 
-The `encoder-decoder` folder contains several autoencoder architectures for experiments
+<!-- The `encoder-decoder` folder contains several autoencoder architectures for experiments -->
+ `encoder.py` and `decoder.py` stores the encoder and decoder architecure
 
-`MiniDeepTaxonNet.py` is the same model but with vanilla autoencoder model such as simple CNN or simple MLP for the proof of concept experiments.
+<!-- `MiniDeepTaxonNet.py` is the same model but with vanilla autoencoder model such as simple CNN or simple MLP for the proof of concept experiments. -->
 
 `train-autoencoder.py` and `train-deep-taxonnet.py` are the main training loops. The former one trains the autoencoder baseline model.
+
+`DeepTaxonNet.py` is the main model.
+
+`utils.py`, NOT `untils.py`, contains all utility functions.
 
 `DTN-basic-node-eval.ipynb` contains the main basic-level node probing evaluation logic:
 ![eval](./repo_images/dtn-eval.drawio-1.png)
