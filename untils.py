@@ -133,8 +133,11 @@ def GumbelSigmoid(logits, tau=1, alpha=1, hard=False, dim=-1):
             gumbel = _gumbel()
         return gumbel
     
+    # print(logits.argmax(dim=-1))
+    
     gumbel = _gumbel()
     gumbel = (logits + gumbel * alpha) / tau
+    # print(gumbel.argmax(dim=-1))
     y_soft = F.sigmoid(gumbel)
     if hard:
         y_hard = (y_soft > 0.5).float()
@@ -151,15 +154,21 @@ def GumbelSoftmax(logits, tau=1, alpha=1, hard=False, dim=-1):
         return gumbel
     
     gumbel = _gumbel()
+    # print(logits.argmax(dim=-1))
     gumbel = (logits + gumbel * alpha) / tau
-    y_soft = F.softmax(gumbel, dim=dim)
+    # print(gumbel.argmax(dim=-1))
+
+    # print(f"number of mathces: {torch.sum(logits.argmax(dim=-1) == gumbel.argmax(dim=-1))}")
+    # y_soft = F.softmax(gumbel, dim=dim)
+    y_soft_log = gumbel - gumbel.logsumexp(dim, keepdim=True)
+    y_soft = y_soft_log.exp()
     if hard:
         index = y_soft.max(dim, keepdim=True)[1]
         y_hard = torch.zeros_like(logits).scatter_(dim, index, 1.0)
         ret = y_hard - y_soft.detach() + y_soft
     else:
         ret = y_soft
-    return ret
+    return ret, y_soft_log
 
 def entropy_regularization(left_prob, eps=1e-8, lambda_=1, layer=0):
     entropy = - (left_prob * torch.log(left_prob + eps) + (1 - left_prob) * torch.log(1 - left_prob + eps))

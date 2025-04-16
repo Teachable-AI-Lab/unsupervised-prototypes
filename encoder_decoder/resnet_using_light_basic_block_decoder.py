@@ -100,7 +100,6 @@ class LightDecoder(nn.Module):
         self.de_conv1 = conv3x3Transposed(self.inplanes, 3) 
         self.bn1 = norm_layer(3)
         self.relu = nn.ReLU(inplace=True)
-        self.sigmoid = nn.Sigmoid()
 
         self.layer3 = self._make_layer(block, 64, layers[2], stride=2)
         self.layer2 = self._make_layer(block, 32, layers[1], stride=2)
@@ -176,8 +175,7 @@ class LightDecoder(nn.Module):
 
         x = self.de_conv1(x)
         x = self.bn1(x)
-        # x = self.relu(x)
-        x = self.sigmoid(x) # Since the input is normalized between 0 and 1, we should use sigmoid instead of relu.
+        x = self.relu(x)
         return x
 
 
