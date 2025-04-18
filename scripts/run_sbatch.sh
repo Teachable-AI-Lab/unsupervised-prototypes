@@ -15,9 +15,9 @@ python train-deep-taxonnet.py \
   --epochs=500 \
   --linear_probing_epochs=50 \
   --wandb=true \
-  --wandb_run_name=vade-6-vae-pt-100 \
+  --wandb_run_name=vade-6-kl-anneal \
   --n_layers=6 \
-  --model_save_path=vade-6-vae-pt-100 \
+  --model_save_path=vade-6-kl-anneal \
   --device_id=0 \
-  --pretraining_epochs=100 \
-  --kl1_weight=1.0 \
+  --pretraining_epochs=0 \
+  --kl1_weight=1 \

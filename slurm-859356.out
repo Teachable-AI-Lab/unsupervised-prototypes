@@ -1,0 +1,42 @@
+no change     /nethome/zwang910/miniconda3/condabin/conda
+no change     /nethome/zwang910/miniconda3/bin/conda
+no change     /nethome/zwang910/miniconda3/bin/conda-env
+no change     /nethome/zwang910/miniconda3/bin/activate
+no change     /nethome/zwang910/miniconda3/bin/deactivate
+no change     /nethome/zwang910/miniconda3/etc/profile.d/conda.sh
+no change     /nethome/zwang910/miniconda3/etc/fish/conf.d/conda.fish
+no change     /nethome/zwang910/miniconda3/shell/condabin/Conda.psm1
+no change     /nethome/zwang910/miniconda3/shell/condabin/conda-hook.ps1
+no change     /nethome/zwang910/miniconda3/lib/python3.12/site-packages/xontrib/conda.xsh
+no change     /nethome/zwang910/miniconda3/etc/profile.d/conda.csh
+no change     /nethome/zwang910/.bashrc
+No action taken.
+
+CondaError: Run 'conda init' before 'conda activate'
+
+wandb: Using wandb-core as the SDK backend.  Please refer to https://wandb.me/wandb-core for more information.
+wandb: Currently logged in as: ndrsn0208 (ndrsn0208-georgia-institute-of-technology) to https://api.wandb.ai. Use `wandb login --relogin` to force relogin
+wandb: Tracking run with wandb version 0.19.8
+wandb: Run data is saved locally in /nethome/zwang910/research/unsupervised-prototypes/wandb/run-20250416_152751-j65t18i6
+wandb: Run `wandb offline` to turn off syncing.
+wandb: Syncing run vade-6-beta-vae
+wandb: ⭐️ View project at https://wandb.ai/ndrsn0208-georgia-institute-of-technology/deep-taxon
+wandb: 🚀 View run at https://wandb.ai/ndrsn0208-georgia-institute-of-technology/deep-taxon/runs/j65t18i6
+Loading data...
+Start training...
+Epoch 0
+Traceback (most recent call last):
+  File "/nethome/zwang910/research/unsupervised-prototypes/train-deep-taxonnet.py", line 124, in <module>
+    loss, recon_loss, kl1, kl2, _, _, _ = model(data)
+                                          ~~~~~^^^^^^
+  File "/nethome/zwang910/miniconda3/envs/dl/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1739, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/nethome/zwang910/miniconda3/envs/dl/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1750, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/nethome/zwang910/research/unsupervised-prototypes/DeepTaxonNet.py", line 266, in forward
+    log_sigma = self.softclip(self.logvar_x, -6)
+TypeError: DeepTaxonNet.softclip() takes 2 positional arguments but 3 were given
+[1;34mwandb[0m: 
+[1;34mwandb[0m: 🚀 View run [33mvade-6-beta-vae[0m at: [34mhttps://wandb.ai/ndrsn0208-georgia-institute-of-technology/deep-taxon/runs/j65t18i6[0m
+[1;34mwandb[0m: Find logs at: [1;35mwandb/run-20250416_152751-j65t18i6/logs[0m

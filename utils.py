@@ -18,7 +18,73 @@ from math import log2  # Import log2 directly to avoid shadowing issues
 # ------------------------------
 def linear_annealing(epoch, anneal_epochs=50):
     # Increase beta linearly until it reaches 1.0
-    return min(1.5, epoch / anneal_epochs)
+    return min(1.0, (epoch+1) / anneal_epochs)
+
+class NoiseScheduler:
+    def __init__(self, num_steps, start_noise=1.0, end_noise=0.0):
+        self.num_steps = num_steps
+        self.start_noise = start_noise
+        self.end_noise = end_noise
+        self.current_step = 0
+
+    def get_noise(self):
+        if self.current_step < self.num_steps:
+            noise = self.start_noise + (self.end_noise - self.start_noise) * (self.current_step / self.num_steps)
+        else:
+            noise = self.end_noise
+        return noise
+        
+    def step(self):
+        self.current_step += 1
+        
+def get_loss_weights(epoch: int,
+                     recon_intv: int,
+                     dkl_intv: int,
+                     start_first: str = 'recon') -> tuple[int, int]:
+    """
+    Returns binary weights (recon_w, dkl_w) for the given epoch:
+
+    - If both intervals are zero, both weights are 1.
+    - If recon_intv == 0, recon_w is always 1; schedule dkl as alternating blocks.
+    - If dkl_intv   == 0, dkl_w   is always 1; schedule recon as alternating blocks.
+    - Otherwise, interleave recon_intv epochs of recon and dkl_intv epochs of dkl,
+      starting with start_first ('recon' or 'dkl').
+    """
+    # Both always-on
+    if recon_intv == 0 and dkl_intv == 0:
+        return 1, 1
+
+    # Only recon always-on: schedule dkl in alternating block
+    if recon_intv == 0:
+        recon_w = 1
+        offset = 0 if start_first == 'dkl' else dkl_intv
+        cycle = 2 * dkl_intv
+        pos = (epoch + offset) % cycle if cycle > 0 else 0
+        dkl_w = int(pos < dkl_intv)
+        return recon_w, dkl_w
+
+    # Only dkl always-on: schedule recon in alternating block
+    if dkl_intv == 0:
+        dkl_w = 1
+        offset = 0 if start_first == 'recon' else recon_intv
+        cycle = 2 * recon_intv
+        pos = (epoch + offset) % cycle if cycle > 0 else 0
+        recon_w = int(pos < recon_intv)
+        return recon_w, dkl_w
+
+    # Both interleave normally
+    cycle = recon_intv + dkl_intv
+    pos = epoch % cycle
+    if start_first == 'recon':
+        recon_w = int(pos < recon_intv)
+        dkl_w   = int(pos >= recon_intv)
+    elif start_first == 'dkl':
+        dkl_w   = int(pos < dkl_intv)
+        recon_w = int(pos >= dkl_intv)
+    else:
+        raise ValueError("start_first must be 'recon' or 'dkl'")
+
+    return recon_w, dkl_w
 
 def pretrain(model, train_loader, optimizer, epochs, device):
     """
@@ -111,7 +177,7 @@ def get_latent(model, test_loader, device):
             all_latent.append(latent)
             all_labels.append(target)
 
-            _, recon_loss, kl1, kl2, H, pcx, pi = model(data)
+            _, recon_loss, kl1, kl2, H, pcx, pi, _ = model(data)
             all_pcx.append(pcx)
             pis = pi.detach().cpu().numpy()
             # pis.append(pi)
@@ -210,7 +276,7 @@ def plot_centroids(centroids_list, layer):
 
 def plot_generated_examples(model, layer, n_examples, device):
     with torch.no_grad():
-        _, mu_c, logvar_c, _ = model.gmm_params()
+        _, mu_c, logvar_c, _, _, _ = model.gmm_params()
         mu_c_list = []
         logvar_c_list = []
         # centroids = centroids.view(-1, shape[0], shape[1], shape[2]).cpu().numpy()
@@ -405,6 +471,18 @@ def get_data_loader(dataset, batch_size, normalize):
             transform = transforms.Compose([
                 transforms.ToTensor(),
                 transforms.Normalize((0.1307,), (0.3081,))
+            ])
+        else:
+            transform = transforms.Compose([
+                transforms.ToTensor()
+            ])
+    elif dataset == 'fashion-mnist':
+        dataset_class = datasets.FashionMNIST
+        data_dir = 'data/FashionMNIST'
+        if normalize:
+            transform = transforms.Compose([
+                transforms.ToTensor(),
+                transforms.Normalize((0.2860,), (0.3530,))
             ])
         else:
             transform = transforms.Compose([

@@ -103,6 +103,26 @@ class MLPDecoder(nn.Module):
     def forward(self, x):
         return self.decoder(x)
     
+#######################################
+#         28*28 Decoder         #
+#######################################
+class Decoder28x28(nn.Module):
+    def __init__(self):
+        super(Decoder28x28, self).__init__()
+        self.decoder = nn.Sequential(
+            nn.ConvTranspose2d(32, 16, kernel_size=3, stride=2, padding=0, output_padding=0),  # output: 16x7x7
+            nn.BatchNorm2d(16),
+            nn.ReLU(inplace=True),
+            nn.ConvTranspose2d(16, 8, kernel_size=3, stride=2, padding=1, output_padding=1),  # output: 8x14x14
+            nn.BatchNorm2d(8),
+            nn.ReLU(inplace=True),
+            nn.ConvTranspose2d(8, 1, kernel_size=3, stride=2, padding=1, output_padding=1),  # output: 1x28x28
+            nn.ReLU(inplace=True)  # final activation for pixel values
+        )
+    def forward(self, x):
+        x = self.decoder(x)
+        return x
+
 
 ##########################################
 #          VGG Decoder                #

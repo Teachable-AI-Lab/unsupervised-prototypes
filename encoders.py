@@ -77,6 +77,28 @@ class MLPEncoder(nn.Module):
     def forward(self, x):
         x = self.encoder(x)
         return x
+
+#######################################
+#         28*28 Encoder         #
+#######################################
+class Encoder28x28(nn.Module):
+    def __init__(self):
+        super(Encoder28x28, self).__init__()
+        self.encoder = nn.Sequential(
+            nn.Conv2d(1, 8, kernel_size=3, stride=2, padding=1),  # output: 8x14x14
+            nn.BatchNorm2d(8),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(8, 16, kernel_size=3, stride=2, padding=1),  # output: 16x7x7
+            nn.BatchNorm2d(16),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(16, 32, kernel_size=3, stride=2, padding=0),  # output: 32x3x3
+            nn.BatchNorm2d(32),
+            nn.ReLU(inplace=True),
+        )
+
+    def forward(self, x):
+        x = self.encoder(x)
+        return x
     
 
 # ####################################

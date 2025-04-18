@@ -25,6 +25,19 @@ class TaxonomicLayer(nn.Module):
 
         self.sigmoid = nn.Sigmoid()
 
+    def kl_div(self, mean1, logvar1, mean2, logvar2):
+        """
+        Compute the KL divergence between two Gaussian distributions.
+        Args:
+            mean1 (Tensor): Mean of the first distribution.
+            logvar1 (Tensor): Log variance of the first distribution.
+            mean2 (Tensor): Mean of the second distribution.
+            logvar2 (Tensor): Log variance of the second distribution.
+        Returns:
+            Tensor: KL divergence between the two distributions. Shape: (batch_size,)
+        """
+        return 0.5 * torch.sum(logvar2 - logvar1 + (logvar1.exp() + (mean1 - mean2)**2) / logvar2.exp() - 1, dim=1)
+
     def forward(self, mean_leaf, logvar_leaf, eps=1e-8):
         """
         Args:
@@ -35,11 +48,24 @@ class TaxonomicLayer(nn.Module):
             mean_parent (Tensor): Parent means with shape (n_clusters, n_hidden).
             var_parent (Tensor): Parent variances with shape (n_clusters, n_hidden).
         """
+        # alpha = self.sigmoid(self.cluster_weight) # shape: n_clusters, 1
+        # want a more flat distribution. What to do?
+        # use a temprature to control the flatness of the distribution
         alpha = self.sigmoid(self.cluster_weight) # shape: n_clusters, 1
         alpha = torch.cat((alpha, 1-alpha), dim=1).unsqueeze(-1) # shape: n_clusters, 2, 1
 
         mean_leaf_expanded = mean_leaf.view(-1, 2, self.n_hidden) # shape: n_clusters, 2, n_hidden
         logvar_leaf_expanded = logvar_leaf.view(-1, 2, self.n_hidden) # shape: n_clusters, 2, n_hidden
+
+        # pick the two children per cluster
+        m_child0, m_child1 = mean_leaf_expanded[:,0], mean_leaf_expanded[:,1]      # each (n_clusters, n_hidden)
+        lv_child0, lv_child1 = logvar_leaf_expanded[:,0], logvar_leaf_expanded[:,1]
+
+        # forward and reverse KL
+        kl_0_1 = self.kl_div(m_child0, lv_child0, m_child1, lv_child1)  # (n_clusters,)
+        kl_1_0 = self.kl_div(m_child1, lv_child1, m_child0, lv_child0)  # (n_clusters,)
+        # symmetrized KL and reshape to (n_clusters, 1)
+        sym_kl = (kl_0_1 + kl_1_0).unsqueeze(1)  # (n_clusters, 1)
 
         mean_root = (alpha * mean_leaf_expanded).sum(dim=1) # shape: n_clusters, n_hidden
         var_leaf = torch.exp(logvar_leaf_expanded)
@@ -68,7 +94,7 @@ class TaxonomicLayer(nn.Module):
         # mean_root = mean_leaf * alpha # shape: n_clusters, 2, n_hidden
         # mean_root = mean_root.reshape(-1, 2, self.n_hidden).sum(dim=1) # shape: n_clusters, n_hidden
         # print(mean_root)
-        return mean_root, logvar_root, alpha.reshape(-1), dkl # shape: 2 * n_clusters, n_hidden
+        return mean_root, logvar_root, alpha.reshape(-1), sym_kl # shape: 2 * n_clusters, n_hidden
 
 class DeepTaxonNet(nn.Module):
     def __init__(self, input_dim=3*32*32, 
@@ -79,6 +105,8 @@ class DeepTaxonNet(nn.Module):
                  encoder_name=None, # string
                  decoder_name=None, # string
                  kl1_weight=1.0,
+                 recon_weight=1.0,
+                 noise_strength=0.0,
                  ):
         super(DeepTaxonNet, self).__init__()
         self.input_dim = input_dim
@@ -89,6 +117,8 @@ class DeepTaxonNet(nn.Module):
         self.encoder_name = encoder_name
         self.decoder_name = decoder_name
         self.kl1_weight = kl1_weight
+        self.recon_weight = recon_weight
+        self.noise_strength = 0.0
 
         ## Encoder
         if self.encoder_name == "mlp":
@@ -103,6 +133,8 @@ class DeepTaxonNet(nn.Module):
             self.encoder = ResNet20LightEncoder()
         elif self.encoder_name == "vgg": 
             self.encoder = VGGEncoder()
+        elif self.encoder_name == "mnist":
+            self.encoder = Encoder28x28()
         else:
             raise ValueError("Unknown encoder type")
         
@@ -119,6 +151,8 @@ class DeepTaxonNet(nn.Module):
             self.decoder_raw = ResNet20LightDecoder()
         elif self.decoder_name == "vgg":                      # For images size < 64x64
             self.decoder_raw = VGGDecoder()
+        elif self.decoder_name == "mnist":
+            self.decoder_raw = Decoder28x28()
         else:
             raise ValueError("Unknown decoder type")
 
@@ -169,17 +203,25 @@ class DeepTaxonNet(nn.Module):
         self.pi_logits_baseline = nn.Parameter(torch.zeros(2**self.n_layers))  # Init 0 => softmax gives uniform distribution # shape: (n_clusters,)
         # 2. Cluster means: shape (n_clusters, latent_dim)
         limit = 1 / (2 ** self.n_layers)
+        # limit = 0.1
+        # limit = 1
+        # limit = 5
         # limit = 0
         # limit = np.sqrt(7)
         self.mu_c = nn.Parameter(torch.nn.init.uniform_(torch.empty(2**self.n_layers, self.latent_dim), -limit, limit))  # Init uniform
         # initialize with normal distribution
         # self.mu_c = nn.Parameter(torch.nn.init.normal_(torch.empty(2**self.n_layers, self.latent_dim), 0, 0.6))  # Init uniform
-        # self.logvar_c = nn.Parameter(torch.nn.init.uniform_(torch.empty(2**self.n_layers, self.latent_dim), -limit, limit))  # Init uniform
+
+        limit = -5
+        self.logvar_c = nn.Parameter(torch.nn.init.uniform_(torch.empty(2**self.n_layers, self.latent_dim), limit, limit+1))  # Init uniform
         # self.mu_c = nn.Parameter(torch.zeros(2**self.n_layers, self.latent_dim))  # Init uniform
-        self.logvar_c = nn.Parameter(torch.zeros(2**self.n_layers, self.latent_dim))  # Init uniform
+
+        # self.logvar_c = nn.Parameter(torch.zeros(2**self.n_layers, self.latent_dim))  # Init uniform
         self.layers = nn.ModuleList(
             [TaxonomicLayer(self.latent_dim, 2**i) for i in reversed(range(0, self.n_layers))]
         ) 
+
+        self.logvar_x = nn.Parameter(torch.zeros(1)[0])
 
     def layer_init(self, module, init_range):
         if isinstance(module, nn.Linear):
@@ -213,7 +255,7 @@ class DeepTaxonNet(nn.Module):
         return x
     
 
-    def forward(self, x, alpha=0.0, tau=1.0):
+    def forward(self, x, tau=1.0):
         mu, logvar = self.encode(x) # shape: (batch_size, latent_dim)
         # mu = (mu - mu.min()) / mu.std() # normalize mu
         # range for logvar
@@ -227,7 +269,7 @@ class DeepTaxonNet(nn.Module):
         # print(f"z range: {z.min()} {z.max()}")
         
         # ELBO Loss
-        pi, mu_c, logvar_c, H = self.gmm_params() # shape: (n_clusters, latent_dim)
+        pi, mu_c, logvar_c, H, alphas, dkl_list = self.gmm_params() # shape: (n_clusters, latent_dim)
 
 
         # pi = F.softmax(self.pi_logits_baseline, dim=0)
@@ -254,12 +296,19 @@ class DeepTaxonNet(nn.Module):
         #     print("x_recon out of range")
         # try:
             # recon_loss = F.binary_cross_entropy(x_recon, x)
-        recon_loss = F.mse_loss(x_recon, x)
         # except:
         #     print("x_recon out of range")
         #     print(x_recon.max(), x_recon.min())
         #     print(x_recon)
+
+        recon_loss = F.mse_loss(x_recon, x)
         recon_loss = recon_loss * self.input_dim
+        recon_loss = recon_loss * self.recon_weight
+        # log_sigma = self.softclip(self.logvar_x, -6)
+        # recon_loss = self.gaussian_nll(x_recon, log_sigma, x).sum()
+        # recon_loss = F.mse_loss(x_recon, x) * self.input_dim / (2 * torch.exp(log_sigma)) + log_sigma * self.input_dim / 2
+
+
         # why multiply by input_dim?
         # because recon_loss is averaged over the batch and the input dimension
 
@@ -273,8 +322,9 @@ class DeepTaxonNet(nn.Module):
         if not self.training:
             # print("eval")
             alpha = 0.0
-        # else:
-            # alpha = 0.06
+        else:
+            alpha = self.noise_strength
+        # print("alpha", alpha)
         logpcpzc = (log_pdf + torch.log(pi.unsqueeze(0))) # log p(c|z) = log p(c) + log p(z|c)
         pcx, logpcx = untils.GumbelSoftmax(logpcpzc, # Gumbel softmax for exploration
                                             tau=tau, 
@@ -348,6 +398,23 @@ class DeepTaxonNet(nn.Module):
 
         loss = recon_loss - kl1 - kl2
 
+        # print("alphas", alphas)
+
+        # encourgae alphas to be uniform
+        alphas = alphas / alphas.sum(dim=0, keepdim=True)
+        # compare to uniform distribution
+        U = torch.ones_like(alphas) / alphas.shape[0]
+
+        # compute the kl between the alpha distribution and the uniform distribution
+        kl_alpha = torch.sum(alphas * (torch.log(alphas + 1e-10) - torch.log(U + 1e-10)), dim=0)
+
+        # print("alphas", alphas)
+        # print("U", U)
+        # print("kl_alpha", kl_alpha.item())
+        # exit(0)
+
+        loss = loss + kl_alpha
+
 
 
         # # penalize the high entropy of the leave node
@@ -380,7 +447,22 @@ class DeepTaxonNet(nn.Module):
         # print("IG", IG.item())
         # loss = loss - IG
 
-        return loss, recon_loss, kl1, kl2, H, pcx, pi
+        dkl_list_flatten = torch.cat(dkl_list, dim=0) / 2# shape: (2 ** (n_layers + 1) - 2, n_clusters)
+        # print(dkl_list_flatten)
+        margin = 15
+        dkl_penalty = torch.relu(margin - dkl_list_flatten)
+        # print("dkl_penalty", dkl_penalty.sum().item())
+        loss = loss + dkl_penalty.sum()
+
+        return loss, recon_loss, kl1, kl2, H, pcx, pi, dkl_list
+    
+    def softclip(self, tensor, min):
+        """ Clips the tensor values at the minimum value min in a softway. Taken from Handful of Trials """
+        result_tensor = min + F.softplus(tensor - min)
+
+        return result_tensor
+    def gaussian_nll(self, mu, log_sigma, x):
+        return 0.5 * torch.pow((x - mu) / log_sigma.exp(), 2) + log_sigma + 0.5 * np.log(2 * np.pi)
     
     def gmm_params(self):   # Return the cluster prior probabilities (pi), means, and log variances.
         layer_mu = []
@@ -395,15 +477,15 @@ class DeepTaxonNet(nn.Module):
         parent_logvar = self.logvar_c
 
         for i, layer in enumerate(self.layers):
-            parent_root, parent_logvar, pi, dkl = layer(parent_root, parent_logvar)
+            parent_root, parent_logvar, alpha, dkl = layer(parent_root, parent_logvar)
             layer_mu.append(parent_root)
             layer_logvar.append(parent_logvar)
-            pi_list.append(pi)
+            pi_list.append(alpha)
             dkl_list.append(dkl)
 
-        pi_list.append(torch.tensor([1.0], device=parent_root.device))
+        # pi_list.append(torch.tensor([1.0], device=parent_root.device))
         # normalize pi_list by its parent
-        pi_list = pi_list[::-1] # reverse the list
+        # pi_list = pi_list[::-1] # reverse the list
         # for pl in pi_list:
         #     print(pl.shape)
         # print("pi_list", pi_list)
@@ -411,10 +493,11 @@ class DeepTaxonNet(nn.Module):
         # for i in range(len(pi_list)-1):
         #     pi_list[i+1] = pi_list[i].unsqueeze(1).expand(-1, 2).reshape(-1) * pi_list[i+1]
         # reverse the list again
-        pi_list = pi_list[::-1][:-1] # remove the last element
+        # pi_list = pi_list[::-1][:-1] # remove the last element
         # concat
-        pi = torch.cat(pi_list, dim=0) # shape: (2 ** (n_layers + 1) - 1, n_clusters)
-        pi = pi / pi.sum()
+        alphas = torch.cat(pi_list, dim=0) # shape: (2 ** (n_layers + 1) - 1, n_clusters)
+        # print("alphas", alphas)
+        # pi = pi / pi.sum()
         # print("pi_list", pi)
         # exit()
 
@@ -428,9 +511,9 @@ class DeepTaxonNet(nn.Module):
         logvar_c = torch.cat(layer_logvar, dim=0)
         # pi = F.softmax(self.pi_logits, dim=0)  # (n_clusters,)
 
-        dkl_list = torch.cat(dkl_list, dim=0) # shape: (2 ** (n_layers + 1) - 2, n_clusters)
+        # dkl_list = torch.cat(dkl_list, dim=0) # shape: (2 ** (n_layers + 1) - 2, n_clusters)
         # dkl_list = dkl_list / dkl_list.sum()
-        dkl_list = F.softmax(dkl_list, dim=0) # (n_clusters,)
+        # dkl_list = F.softmax(dkl_list, dim=0) # (n_clusters,)
 
         # pi = dkl_list
         # check if pi has any zeros
@@ -445,13 +528,13 @@ class DeepTaxonNet(nn.Module):
         # print("dkl_list", dkl_list)
         # mu_c = self.mu_c
         # logvar_c = self.logvar_c
-        pi = F.softmax(self.pi_logits, dim=0) # shuould give uniform distribution
+        # pi = F.softmax(self.pi_logits, dim=0) # shuould give uniform distribution
         # pi = torch.tensor([1/2**(self.n_layers)] * (2**self.n_layers), device=pi.device)
-        # N_NODES = 2**(self.n_layers+1)-1
-        # pi = torch.tensor([1/N_NODES] * N_NODES, device=pi.device)
+        N_NODES = 2**(self.n_layers+1)-1
+        pi = torch.tensor([1/N_NODES] * N_NODES, device=mu_c.device)
         # print("pi", pi.shape, pi)
         # exit()
-        return pi, mu_c, logvar_c, H
+        return pi, mu_c, logvar_c, H, alphas, dkl_list
     
     def gaussian_pdf(self, x, mu, logvar):
         """
