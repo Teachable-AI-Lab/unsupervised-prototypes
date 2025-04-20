@@ -50,13 +50,13 @@ parser.add_argument('--pretraining_lr', type=float, default=1e-3)
 parser.add_argument('--kl1_weight', type=float, default=1.0)
 ## Model args
 parser.add_argument('--n_layers', type=int, default=4)
-parser.add_argument('--latent_dim', type=int, default=64)
-parser.add_argument('--enc_hidden_dim', type=int, default=64*8*8)
-parser.add_argument('--dec_hidden_dim', type=tuple, default=(64,8,8))
-parser.add_argument('--encoder_name', type=str, default='resnet18_light')
-parser.add_argument('--decoder_name', type=str, default='resnet18_light')
+parser.add_argument('--latent_dim', type=int, default=8)
+parser.add_argument('--enc_hidden_dim', type=int, default=32*3*3)
+parser.add_argument('--dec_hidden_dim', type=tuple, default=(32,3,3))
+parser.add_argument('--encoder_name', type=str, default='mnist')
+parser.add_argument('--decoder_name', type=str, default='mnist')
 ## Data args
-parser.add_argument('--dataset', type=str, default='cifar-10')
+parser.add_argument('--dataset', type=str, default='mnist')
 parser.add_argument('--normalize', type=bool, default=False)
 ## Wandb args
 parser.add_argument('--wandb', type=bool, default=False)
@@ -118,14 +118,21 @@ for epoch in range(epochs):
 
         data = data.to(device)
 
-        beta = utils.linear_annealing(epoch, anneal_epochs=150)     
-        model.kl1_weight = beta
+        # beta = utils.linear_annealing(epoch, anneal_epochs=150)     
+        # model.kl1_weight = beta
+
+        if epoch < 10:
+            model.noise_strength = 0.0
+        elif epoch < 30:
+            model.noise_strength = 0.1
+        elif epoch < 50:
+            model.noise_strength = 0.2
 
         # recon_weight, kl1_weight = utils.get_loss_weights(epoch, 0, 1, 'dkl')
         # model.kl1_weight = kl1_weight
         # model.recon_weight = recon_weight
 
-        loss, recon_loss, kl1, kl2, _, _, _ = model(data)   
+        loss, recon_loss, kl1, kl2, _, _, _, _ = model(data)   
 
 
         if args.wandb:
@@ -133,7 +140,7 @@ for epoch in range(epochs):
                         'recon_loss': recon_loss.item(),
                         'kl1': -kl1.item(),
                         'kl2': -kl2.item(),
-                        'beta': model.logvar_x.item(),
+                        # 'beta': model.logvar_x.item(),
                        'steps': steps})
 
         loss.backward()
@@ -178,9 +185,9 @@ for epoch in range(epochs):
         if not os.path.exists(model_save_path):
             os.makedirs(model_save_path)
         # evaluate model via linear probing
-        acc = utils.linear_probing(model, args.n_classes, train_loader, test_loader, lr=args.linear_probing_lr, epochs=args.linear_probing_epochs, device=device)
-        if args.wandb:
-            wandb.log({'linear_probe_acc': acc, 'epoch': epoch})
+        # acc = utils.linear_probing(model, args.n_classes, train_loader, test_loader, lr=args.linear_probing_lr, epochs=args.linear_probing_epochs, device=device)
+        # if args.wandb:
+            # wandb.log({'linear_probe_acc': acc, 'epoch': epoch})
         
         torch.save(model.state_dict(), f'{model_save_path}/deep_taxon_{epoch}.pt')
         print(f'Model saved at {model_save_path}/deep_taxon_{epoch}.pt')

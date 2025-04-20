@@ -122,6 +122,96 @@ def pretrain(model, train_loader, optimizer, epochs, device):
     # print(torch.max(model.mu_c), torch.min(model.mu_c))
     # print(torch.max(model.logvar_c), torch.min(model.logvar_c))
 
+def label_annotation(model, suppoer_set, n_classes, device):
+    '''
+    support_set: N, input_dim, The training data
+
+    return: a n_classs x n_nodes matrix. Each column stores the class distribution of the corresponding cluster.
+    '''
+    model.eval()
+    pcx = []
+    labels = []
+
+    support_loader = DataLoader(suppoer_set, batch_size=512, shuffle=False)
+
+    with torch.no_grad():
+        for i, (image, label) in enumerate(support_loader):
+            image = image.to(device)
+            _, _, _, _, _, pcx_batch, _, _ = model(image)
+            pcx.append(pcx_batch)
+            labels.append(label)
+
+    pcx = torch.cat(pcx, dim=0) # shape: (N, n_nodes)
+
+    labels = torch.cat(labels, dim=0) # shape: (N, )
+
+    N = pcx.shape[0]
+    n_nodes = pcx.shape[1]
+
+    # turn pcx into one-hot
+    # pcx = pcx.argmax(dim=1) # shape: (N, ) # return index? Answer: yes
+    # pcx = F.one_hot(pcx, num_classes=n_nodes) # shape: (N, n_classes)
+
+    annotation = torch.zeros(n_classes, n_nodes)
+
+
+    for c in range(n_classes):
+        class_indices = (labels == c)
+
+        pcx_c = pcx[class_indices] # shape: (N_c, n_nodes)
+        pcx_c = pcx_c.sum(dim=0) # shape: (n_nodes, )
+
+        annotation[c, :] = pcx_c
+
+    
+
+    # normlize the annotation on each column
+    annotation = annotation / torch.sum(annotation, dim=0, keepdim=True)
+
+    return annotation
+
+def basic_node_evaluation(model, annotation, query_set, device):
+    # annotation: n_classes x n_nodes
+    model.eval()
+    pcx = []
+    labels = []
+
+    query_loader = DataLoader(query_set, batch_size=512, shuffle=False)
+
+    with torch.no_grad():
+        for i, (image, label) in enumerate(query_loader):
+            image = image.to(device)
+            _, _, _, _, _, pcx_batch, _, _ = model(image)
+            pcx.append(pcx_batch.detach().cpu())
+            labels.append(label)
+
+    pcx = torch.cat(pcx, dim=0) # shape: (N, n_nodes)
+    labels = torch.cat(labels, dim=0) # shape: (N, )
+
+    # find argmax of pcx
+    # pred = pcx.argmax(dim=1) # shape: (N, ) # return index? Answer: yes
+    # print(f"pred shape: {pred[:10]}")
+    # index the columns of annotation 
+    # pred = annotation[:, pred] # shape: (n_classes, N)
+    # pred = pred.T # shape: (N, n_classes)
+
+    # weight the columns of annotation by pcx
+    pred = pcx @ annotation.T # shape: (N, n_classes)
+    print(f"pred shape: {pred.shape}")
+
+    pred = pred.argmax(dim=1) # shape: (N, ) # return index? Answer: yes
+
+    # compute accuracy
+    correct = (pred == labels).sum().item()
+    total = labels.size(0)
+    acc = correct / total
+    # print(f"Accuracy: {acc:.4f}")
+    return acc
+
+    # print(pred[0])
+    
+
+
 def linear_probing(model, n_classes, train_loader, test_loader, lr, epochs, device):
     """
     Train a linear classifier on top of the frozen encoder.
@@ -216,9 +306,9 @@ def plot_tsne(all_latent, all_labels):
     tsne_results = tsne.fit_transform(all_latent)
     # plt.figure(figsize=(5, 5))
     fig = plt.figure(figsize=(5, 5))
-    plt.scatter(tsne_results[:len(all_labels), 0], tsne_results[:len(all_labels), 1], c=all_labels, cmap='tab10', s=10)
+    plt.scatter(tsne_results[:len(all_labels), 0], tsne_results[:len(all_labels), 1], c=all_labels, cmap='tab10', s=5)
     plt.colorbar()
-    plt.scatter(tsne_results[len(all_labels):, 0], tsne_results[len(all_labels):, 1], c='black', s=50, marker='x')
+    plt.scatter(tsne_results[len(all_labels):, 0], tsne_results[len(all_labels):, 1], c='black', s=10, marker='x')
 
     # return the figiure
     return fig
@@ -488,12 +578,56 @@ def get_data_loader(dataset, batch_size, normalize):
             transform = transforms.Compose([
                 transforms.ToTensor()
             ])
+    elif dataset == 'svhn':
+        dataset_class = datasets.SVHN
+        data_dir = 'data/SVHN'
+        if normalize:
+            transform = transforms.Compose([
+                transforms.ToTensor(),
+                transforms.Normalize((0.4377, 0.4438, 0.4728), (0.1980, 0.2010, 0.1970))
+            ])
+        else:
+            transform = transforms.Compose([
+                transforms.ToTensor()
+            ])
+    elif dataset == 'stl10':
+        dataset_class = datasets.STL10
+        data_dir = 'data/STL10'
+        if normalize:
+            transform = transforms.Compose([
+                transforms.ToTensor(),
+                transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+            ])
+        else:
+            transform = transforms.Compose([
+                transforms.ToTensor()
+            ])
+    elif dataset == 'omniglot':
+        dataset_class = datasets.Omniglot
+        data_dir = 'data/OMNIGLOT'
+        if normalize:
+            transform = transforms.Compose([
+                # resize to 28x28
+                transforms.Resize(28),
+                transforms.ToTensor(),
+                transforms.Normalize((0.5,), (0.5,))
+            ])
+        else:
+            transform = transforms.Compose([
+                transforms.Resize(28),
+                transforms.ToTensor()
+            ])
     else:
         raise ValueError("Unsupported dataset. Choose from 'cifar-10', 'cifar-100', or 'mnist'.")
 
+    if dataset == 'omniglot':
+        train_set = dataset_class(root=data_dir, download=download, transform=transform)
+        test_set = dataset_class(root=data_dir, download=download, transform=transform)
+
+    else:
     # Create the training and testing datasets
-    train_set = dataset_class(root=data_dir, train=True, download=download, transform=transform)
-    test_set = dataset_class(root=data_dir, train=False, download=download, transform=transform)
+        train_set = dataset_class(root=data_dir, train=True, download=download, transform=transform)
+        test_set = dataset_class(root=data_dir, train=False, download=download, transform=transform)
 
     # Create DataLoaders for training and testing
     train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True,

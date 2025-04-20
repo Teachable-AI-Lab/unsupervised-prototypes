@@ -135,6 +135,8 @@ class DeepTaxonNet(nn.Module):
             self.encoder = VGGEncoder()
         elif self.encoder_name == "mnist":
             self.encoder = Encoder28x28()
+        elif self.encoder_name == "omniglot":
+            self.encoder = OmniglotEncoder()
         else:
             raise ValueError("Unknown encoder type")
         
@@ -153,6 +155,8 @@ class DeepTaxonNet(nn.Module):
             self.decoder_raw = VGGDecoder()
         elif self.decoder_name == "mnist":
             self.decoder_raw = Decoder28x28()
+        elif self.decoder_name == "omniglot":
+            self.decoder_raw = OmniglotDecoder()
         else:
             raise ValueError("Unknown decoder type")
 
@@ -212,7 +216,7 @@ class DeepTaxonNet(nn.Module):
         # initialize with normal distribution
         # self.mu_c = nn.Parameter(torch.nn.init.normal_(torch.empty(2**self.n_layers, self.latent_dim), 0, 0.6))  # Init uniform
 
-        limit = -5
+        limit = -3
         self.logvar_c = nn.Parameter(torch.nn.init.uniform_(torch.empty(2**self.n_layers, self.latent_dim), limit, limit+1))  # Init uniform
         # self.mu_c = nn.Parameter(torch.zeros(2**self.n_layers, self.latent_dim))  # Init uniform
 
@@ -246,6 +250,9 @@ class DeepTaxonNet(nn.Module):
     def reparameterize(self, mu, logvar):
         std = torch.exp(0.5 * logvar)
         eps = torch.randn_like(std)
+        if not self.training:
+            # print("eval")
+            eps = torch.zeros_like(std)
         return mu + eps * std
     
     def decode(self, z):
@@ -318,7 +325,7 @@ class DeepTaxonNet(nn.Module):
         # p(c|z) is p(c)p(z|c)/sum(p(z|c)p(c))
         z_l = self.reparameterize(mu, logvar) # sample a new z
         log_pdf = self.gaussian_pdf(z_l, mu_c, logvar_c) # shape: (batch_size, n_clusters). This is p(z|c)
-        # tau = 1.0
+        # tau = 0.8
         if not self.training:
             # print("eval")
             alpha = 0.0
@@ -407,8 +414,6 @@ class DeepTaxonNet(nn.Module):
 
         # compute the kl between the alpha distribution and the uniform distribution
         kl_alpha = torch.sum(alphas * (torch.log(alphas + 1e-10) - torch.log(U + 1e-10)), dim=0)
-
-        # print("alphas", alphas)
         # print("U", U)
         # print("kl_alpha", kl_alpha.item())
         # exit(0)
@@ -449,7 +454,7 @@ class DeepTaxonNet(nn.Module):
 
         dkl_list_flatten = torch.cat(dkl_list, dim=0) / 2# shape: (2 ** (n_layers + 1) - 2, n_clusters)
         # print(dkl_list_flatten)
-        margin = 15
+        margin = 1
         dkl_penalty = torch.relu(margin - dkl_list_flatten)
         # print("dkl_penalty", dkl_penalty.sum().item())
         loss = loss + dkl_penalty.sum()

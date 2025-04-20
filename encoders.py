@@ -100,6 +100,42 @@ class Encoder28x28(nn.Module):
         x = self.encoder(x)
         return x
     
+#######################################
+#          Omniglot Encoder         #
+#######################################
+class OmniglotEncoder(nn.Module):
+    def __init__(self):
+        super(OmniglotEncoder, self).__init__()
+        self.encoder = nn.Sequential(
+            # 28→28
+            nn.Conv2d(1, 32, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm2d(32),
+            nn.ReLU(inplace=True),
+            # 28→13  ⟵ switched to 4×4
+            nn.Conv2d(32, 32, kernel_size=4, stride=2, padding=0),
+            nn.BatchNorm2d(32),
+            nn.ReLU(inplace=True),
+            # 13→13
+            nn.Conv2d(32, 64, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm2d(64),
+            nn.ReLU(inplace=True),
+            # 13→5   ⟵ switched to 4×4
+            nn.Conv2d(64, 64, kernel_size=4, stride=2, padding=0),
+            nn.BatchNorm2d(64),
+            nn.ReLU(inplace=True),
+            # 5→5
+            nn.Conv2d(64, 128, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm2d(128),
+            nn.ReLU(inplace=True),
+            # 5→1    ⟵ switched to 4×4
+            nn.Conv2d(128, 128, kernel_size=4, stride=2, padding=0),
+            nn.ReLU(inplace=True),
+        )
+
+    def forward(self, x):
+        x = self.encoder(x)
+        return x
+    
 
 # ####################################
 #           VGG Encoder            #

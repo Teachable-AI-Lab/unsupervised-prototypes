@@ -32,6 +32,43 @@ class ResNet18Decoder(nn.Module):
 
     def forward(self, x):
         return self.decoder(x)
+    
+####################################
+#       Omniglot Decoder          #
+###################################
+class OmniglotDecoder(nn.Module):
+    def __init__(self):
+        super(OmniglotDecoder, self).__init__()
+        self.decoder = nn.Sequential(
+            # 1→5    ⟵ 4×4 upsample
+            nn.ConvTranspose2d(128, 128, kernel_size=4, stride=2, padding=0, output_padding=1),
+            nn.BatchNorm2d(128),
+            nn.ReLU(inplace=True),
+            # 5→5
+            nn.ConvTranspose2d(128, 64, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm2d(64),
+            nn.ReLU(inplace=True),
+            # 5→13   ⟵ 4×4 upsample
+            nn.ConvTranspose2d(64, 64, kernel_size=4, stride=2, padding=0, output_padding=1),
+            nn.BatchNorm2d(64),
+            nn.ReLU(inplace=True),
+            # 13→13
+            nn.ConvTranspose2d(64, 32, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm2d(32),
+            nn.ReLU(inplace=True),
+            # 13→28  ⟵ 4×4 upsample (needs output_padding=1 to land on 28)
+            nn.ConvTranspose2d(32, 32, kernel_size=4, stride=2, padding=0, output_padding=0),
+            nn.BatchNorm2d(32),
+            nn.ReLU(inplace=True),
+            # 28→28
+            nn.Conv2d(32, 1, kernel_size=3, stride=1, padding=1),
+            # nn.Sigmoid(),
+            nn.ReLU(inplace=True),
+        )
+
+    def forward(self, x):
+        x = self.decoder(x)
+        return x
 
 ####################################
 #       ResNet-34 Decoder          # For images size >= 64x64
