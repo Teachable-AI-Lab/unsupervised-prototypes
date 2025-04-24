@@ -17,18 +17,10 @@ import torch.nn as nn
 #       ResNet-18 Decoder          # For images size >= 64x64
 ####################################
 class ResNet18Decoder(nn.Module): 
-    def __init__(self, latent_dim, c, h, w):
+    def __init__(self):
         super(ResNet18Decoder, self).__init__()
-        self.latent_dim = latent_dim
-        self.c = c
-        self.h = h
-        self.w = w
-        self.decoder = nn.Sequential(
-            nn.Linear(self.latent_dim, self.c * self.h * self.w),
-            nn.ReLU(),
-            nn.Unflatten(1, (self.c, self.h, self.w)),
-            Decoder(BasicBlockDec, [2, 2, 2, 2]),
-        )
+        self.decoder = Decoder(BasicBlockDec, [2, 2, 2, 2])
+
 
     def forward(self, x):
         return self.decoder(x)

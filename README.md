@@ -4,6 +4,8 @@
 ## How to use
 
 The `scripts` folder contains shell commands for training Deep Taxonomic Network model.
+The training configuration is stored as JSON files in the `scripts/configs/` folder
+Run `run_config.sh` in slurm system.
 
 <!-- The `encoder-decoder` folder contains several autoencoder architectures for experiments -->
  `encoder.py` and `decoder.py` stores the encoder and decoder architecure

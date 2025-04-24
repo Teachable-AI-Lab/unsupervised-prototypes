@@ -107,6 +107,10 @@ class DeepTaxonNet(nn.Module):
                  kl1_weight=1.0,
                  recon_weight=1.0,
                  noise_strength=0.0,
+                 dkl_margin=0.0,
+                 dkl_weight_lambda=0.0,
+                 convex_weight_lambda=0.0,
+                 vade_baseline=False,
                  ):
         super(DeepTaxonNet, self).__init__()
         self.input_dim = input_dim
@@ -119,6 +123,10 @@ class DeepTaxonNet(nn.Module):
         self.kl1_weight = kl1_weight
         self.recon_weight = recon_weight
         self.noise_strength = 0.0
+        self.dkl_margin = dkl_margin
+        self.dkl_weight_lambda = dkl_weight_lambda
+        self.convex_weight_lambda = convex_weight_lambda
+        self.vade_baseline = vade_baseline
 
         ## Encoder
         if self.encoder_name == "mlp":
@@ -204,7 +212,9 @@ class DeepTaxonNet(nn.Module):
         # GMM Prior Parameters:
         # 1. Cluster prior logits; softmax gives pi (mixing coefficients)
         self.pi_logits = nn.Parameter(torch.zeros(2**(self.n_layers+1)-1))  # Init 0 => softmax gives uniform distribution # shape: (n_clusters,)
-        self.pi_logits_baseline = nn.Parameter(torch.zeros(2**self.n_layers))  # Init 0 => softmax gives uniform distribution # shape: (n_clusters,)
+
+        if self.vade_baseline:
+            self.pi_logits = nn.Parameter(torch.zeros(2**self.n_layers))  # Init 0 => softmax gives uniform distribution # shape: (n_clusters,)
         # 2. Cluster means: shape (n_clusters, latent_dim)
         limit = 1 / (2 ** self.n_layers)
         # limit = 0.1
@@ -216,7 +226,7 @@ class DeepTaxonNet(nn.Module):
         # initialize with normal distribution
         # self.mu_c = nn.Parameter(torch.nn.init.normal_(torch.empty(2**self.n_layers, self.latent_dim), 0, 0.6))  # Init uniform
 
-        limit = -3
+        limit = -6
         self.logvar_c = nn.Parameter(torch.nn.init.uniform_(torch.empty(2**self.n_layers, self.latent_dim), limit, limit+1))  # Init uniform
         # self.mu_c = nn.Parameter(torch.zeros(2**self.n_layers, self.latent_dim))  # Init uniform
 
@@ -224,8 +234,6 @@ class DeepTaxonNet(nn.Module):
         self.layers = nn.ModuleList(
             [TaxonomicLayer(self.latent_dim, 2**i) for i in reversed(range(0, self.n_layers))]
         ) 
-
-        self.logvar_x = nn.Parameter(torch.zeros(1)[0])
 
     def layer_init(self, module, init_range):
         if isinstance(module, nn.Linear):
@@ -250,9 +258,9 @@ class DeepTaxonNet(nn.Module):
     def reparameterize(self, mu, logvar):
         std = torch.exp(0.5 * logvar)
         eps = torch.randn_like(std)
-        if not self.training:
-            # print("eval")
-            eps = torch.zeros_like(std)
+        # if not self.training:
+        #     # print("eval")
+        #     eps = torch.zeros_like(std)
         return mu + eps * std
     
     def decode(self, z):
@@ -274,10 +282,22 @@ class DeepTaxonNet(nn.Module):
         # print(x_recon)
         # print the range of z
         # print(f"z range: {z.min()} {z.max()}")
-        
         # ELBO Loss
-        pi, mu_c, logvar_c, H, alphas, dkl_list = self.gmm_params() # shape: (n_clusters, latent_dim)
+        if self.vade_baseline:
+            mu_c = self.mu_c
+            logvar_c = self.logvar_c
 
+            N_NODES = 2**self.n_layers
+            pi = torch.tensor([1/N_NODES] * N_NODES, device=mu_c.device)
+
+            H = None
+            alphas = None
+            dkl_list = None
+        
+        else:
+            pi, mu_c, logvar_c, H, alphas, dkl_list = self.gmm_params() # shape: (n_clusters, latent_dim)
+            # logvar_c = torch.zeros_like(logvar_c, device=logvar_c.device)
+            # logvar_c = logvar_c - 6 # set logvar_c to -6 for all clusters
 
         # pi = F.softmax(self.pi_logits_baseline, dim=0)
         # mu_c = self.mu_c
@@ -407,57 +427,71 @@ class DeepTaxonNet(nn.Module):
 
         # print("alphas", alphas)
 
-        # encourgae alphas to be uniform
-        alphas = alphas / alphas.sum(dim=0, keepdim=True)
-        # compare to uniform distribution
-        U = torch.ones_like(alphas) / alphas.shape[0]
+        if not self.vade_baseline:
+            # encourgae alphas to be uniform
+            alphas = alphas / alphas.sum(dim=0, keepdim=True)
+            # compare to uniform distribution
+            U = torch.ones_like(alphas) / alphas.shape[0]
 
-        # compute the kl between the alpha distribution and the uniform distribution
-        kl_alpha = torch.sum(alphas * (torch.log(alphas + 1e-10) - torch.log(U + 1e-10)), dim=0)
-        # print("U", U)
-        # print("kl_alpha", kl_alpha.item())
-        # exit(0)
+            # compute the kl between the alpha distribution and the uniform distribution
+            kl_alpha = alphas * (torch.log(alphas + 1e-10) - torch.log(U + 1e-10))
+            kl_alpha_weights = utils.convex_weight_decay(self.n_layers, self.convex_weight_lambda)
+            kl_alpha = kl_alpha * kl_alpha_weights.to(alphas.device)
+            kl_alpha = kl_alpha.sum(dim=0)
+            # print("kl_alpha shape", kl_alpha.shape)
+            # print("kl_alpha_weights shape", kl_alpha_weights.shape)
+            # print("kl_alpha", kl_alpha)
+            # print("kl_alpha_weights", kl_alpha_weights)
+            # print("U", U)
+            # print("kl_alpha", kl_alpha.item())
+            # exit(0)
 
-        loss = loss + kl_alpha
+            loss = loss + kl_alpha
 
 
 
-        # # penalize the high entropy of the leave node
-        H_leaf = H[0]
-        H_root = H[-1]
-        # loss = loss# + 0.01 * torch.mean(H_leaf) - 0.01 * torch.mean(H_root)
-        # H_leaf = H_leaf.sum(dim=0)
-        # print("H_leaf", H_leaf)
-        # clamp the H_leaf with maximum of 0.1
-        # self.logvar_c = torch.clamp(self.logvar_c, max=0.1)
-        # H_leaf = torch.clamp(H_leaf, max=0.1)
-        # # print("H_leaf", H_leaf)
-        # T = H_leaf.mean()
-        # penalty = torch.relu(H_leaf - T)
-        # entropy_reg_loss = 1 * torch.mean(penalty)
-        # loss = loss + entropy_reg_loss
-        # print("entropy_reg_loss", entropy_reg_loss.item())
+            # # penalize the high entropy of the leave node
+            H_leaf = H[0]
+            H_root = H[-1]
+            # loss = loss# + 0.01 * torch.mean(H_leaf) - 0.01 * torch.mean(H_root)
+            # H_leaf = H_leaf.sum(dim=0)
+            # print("H_leaf", H_leaf)
+            # clamp the H_leaf with maximum of 0.1
+            # self.logvar_c = torch.clamp(self.logvar_c, max=0.1)
+            # H_leaf = torch.clamp(H_leaf, max=0.1)
+            # # print("H_leaf", H_leaf)
+            # T = H_leaf.mean()
+            # penalty = torch.relu(H_leaf - T)
+            # entropy_reg_loss = 1 * torch.mean(penalty)
+            # loss = loss + entropy_reg_loss
+            # print("entropy_reg_loss", entropy_reg_loss.item())
 
-        # compute information gain
-        # logpdf to H
-        # H_node = - torch.exp(log_pdf) * log_pdf
-        # # print("H_node", H_node.shape)
-        # H_root = H_node[:, -1:]
-        # # print("H_root", H_root.shape)
-        # H_leaf = H_node[:, :(2**self.n_layers)]
-        # H_parents = H_node[:, (2**self.n_layers):]
-        # IG = H_root.sum(dim=1) + H_parents.sum(dim=1) - H_leaf.sum(dim=1)
-        # # print("IG", IG, IG.shape)
-        # IG = torch.mean(IG)
-        # print("IG", IG.item())
-        # loss = loss - IG
+            # compute information gain
+            # logpdf to H
+            # H_node = - torch.exp(log_pdf) * log_pdf
+            # # print("H_node", H_node.shape)
+            # H_root = H_node[:, -1:]
+            # # print("H_root", H_root.shape)
+            # H_leaf = H_node[:, :(2**self.n_layers)]
+            # H_parents = H_node[:, (2**self.n_layers):]
+            # IG = H_root.sum(dim=1) + H_parents.sum(dim=1) - H_leaf.sum(dim=1)
+            # # print("IG", IG, IG.shape)
+            # IG = torch.mean(IG)
+            # print("IG", IG.item())
+            # loss = loss - IG
 
-        dkl_list_flatten = torch.cat(dkl_list, dim=0) / 2# shape: (2 ** (n_layers + 1) - 2, n_clusters)
-        # print(dkl_list_flatten)
-        margin = 1
-        dkl_penalty = torch.relu(margin - dkl_list_flatten)
-        # print("dkl_penalty", dkl_penalty.sum().item())
-        loss = loss + dkl_penalty.sum()
+            dkl_list_flatten = torch.cat(dkl_list, dim=0) / 2# shape: (2 ** (n_layers + 1) - 2, n_clusters)
+            # print(dkl_list_flatten)
+            margin = self.dkl_margin
+            margin = utils.dkl_weight_warmup(self.n_layers, margin, self.dkl_weight_lambda)
+            # print("margin_weight shape", margin_weight.shape)
+            # print("margin_weight", margin_weight)
+            # print("margin", margin)
+            # print("dkl_list_flatten shape", dkl_list_flatten.shape)
+            dkl_penalty = torch.relu(margin.to(dkl_list_flatten.device) - dkl_list_flatten.squeeze(1))
+            # print("dkl_penalty shape", dkl_penalty.shape)
+            # print("dkl_penalty", dkl_penalty.sum().item())
+            loss = loss + dkl_penalty.sum()
 
         return loss, recon_loss, kl1, kl2, H, pcx, pi, dkl_list
     
