@@ -133,6 +133,8 @@ model = DeepTaxonNet(
     dkl_weight_lambda=args.dkl_weight_lambda,
     convex_weight_lambda=args.convex_weight_lambda,
     vade_baseline=args.vade_baseline,
+    pretrained_encoder=args.pretrained_encoder,
+    logvar_init_range=args.logvar_init_range,
 ).to(device)
 
 # pretraining only on encoder and decoder
@@ -173,7 +175,7 @@ for epoch in range(epochs):
 
         data = data.to(device)
 
-        # beta = utils.linear_annealing(epoch, anneal_epochs=150)     
+        # beta = utils.linear_annealing(steps, anneal_epochs=40000)     
         # model.kl1_weight = beta
 
         # if epoch < 10:
@@ -208,26 +210,27 @@ for epoch in range(epochs):
     if scheduler is not None:
         scheduler.step()
     if not args.vade_baseline:
-        if args.dataset == 'omniglot':
-            all_latent, all_labels, pcx, pis, centroid_list, H = utils.get_latent(model, train_loader, device)
-        else:
-            all_latent, all_labels, pcx, pis, centroid_list, H = utils.get_latent(model, test_loader, device)
-        # viz_fig = untils.viz_examplar(model, test_data, n_data=1000, device=device, layer=5, k=10, normalize=args.normalize)
-        viz_tsne = utils.plot_tsne(all_latent, all_labels)
-        if args.wandb:
-            wandb.log({'t-sne': wandb.Image(viz_tsne), 'epoch': epoch})
-
-        viz_pcx = utils.plot_qcx(pcx)
-        if args.wandb:
-            wandb.log({'viz_pcx': wandb.Image(viz_pcx), 'epoch': epoch})
-
-        # viz_pi = utils.plot_pi(pis)
+        pass
+        # if args.dataset == 'omniglot':
+        #     all_latent, all_labels, pcx, pis, centroid_list, H = utils.get_latent(model, train_loader, device)
+        # else:
+        #     all_latent, all_labels, pcx, pis, centroid_list, H = utils.get_latent(model, test_loader, device)
+        # # viz_fig = untils.viz_examplar(model, test_data, n_data=1000, device=device, layer=5, k=10, normalize=args.normalize)
+        # viz_tsne = utils.plot_tsne(all_latent, all_labels)
         # if args.wandb:
-        #     wandb.log({'viz_pi': wandb.Image(viz_pi), 'epoch': epoch})
+        #     wandb.log({'t-sne': wandb.Image(viz_tsne), 'epoch': epoch})
 
-        viz_entropy = utils.plot_entropy(H)
-        if args.wandb:
-            wandb.log({'viz_entropy': wandb.Image(viz_entropy), 'epoch': epoch})
+        # viz_pcx = utils.plot_qcx(pcx)
+        # if args.wandb:
+        #     wandb.log({'viz_pcx': wandb.Image(viz_pcx), 'epoch': epoch})
+
+        # # viz_pi = utils.plot_pi(pis)
+        # # if args.wandb:
+        # #     wandb.log({'viz_pi': wandb.Image(viz_pi), 'epoch': epoch})
+
+        # viz_entropy = utils.plot_entropy(H)
+        # if args.wandb:
+        #     wandb.log({'viz_entropy': wandb.Image(viz_entropy), 'epoch': epoch})
 
         # for layer in range(5):
         #     viz_centroid = utils.plot_centroids(centroid_list, layer)
@@ -294,6 +297,13 @@ for epoch in range(epochs):
             acc = utils.testing_few_shot(model, fs_query_loader, device)
             if args.wandb:
                 wandb.log({'20-way 5-shot acc': acc, 'epoch': epoch})
+
+        elif args.dataset == 'stl-10':
+            stl10_train_loader, stl10_test_loader, _, _ = utils.get_data_loader('stl-10-eval', 256, False)
+            annotation = utils.label_annotation(model, stl10_train_loader, args.n_classes, device)
+            acc = utils.basic_node_evaluation(model, annotation, stl10_test_loader, device)
+            if args.wandb:
+                wandb.log({'Accuracy': acc, 'epoch': epoch})
             
         else:
             annotation = utils.label_annotation(model, train_loader, args.n_classes, device)

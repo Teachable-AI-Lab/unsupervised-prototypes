@@ -111,6 +111,8 @@ class DeepTaxonNet(nn.Module):
                  dkl_weight_lambda=0.0,
                  convex_weight_lambda=0.0,
                  vade_baseline=False,
+                 pretrained_encoder=None,
+                 logvar_init_range=-4,
                  ):
         super(DeepTaxonNet, self).__init__()
         self.input_dim = input_dim
@@ -127,6 +129,11 @@ class DeepTaxonNet(nn.Module):
         self.dkl_weight_lambda = dkl_weight_lambda
         self.convex_weight_lambda = convex_weight_lambda
         self.vade_baseline = vade_baseline
+        self.pretrained_encoder = pretrained_encoder
+        self.logvar_init_range = logvar_init_range
+
+        if self.pretrained_encoder:
+            self.pretrained = utils.get_pretrained('checkpoint_0040.pth.tar')
 
         ## Encoder
         if self.encoder_name == "mlp":
@@ -150,7 +157,7 @@ class DeepTaxonNet(nn.Module):
         
         ## Decoder
         if self.decoder_name == "mlp":
-            self.decoder_raw = MLPDecoder(self.latent_dim, self.dec_hidden_dim, self.input_dim)
+            self.decoder_raw = MLPDecoder(self.dec_hidden_dim, self.input_dim)
         elif self.decoder_name == "resnet18":                 # For images size >= 64x64
             self.decoder_raw = ResNet18Decoder()
         elif self.decoder_name == "resnet34":                 # For images size >= 64x64
@@ -189,7 +196,7 @@ class DeepTaxonNet(nn.Module):
         ## De-Projection heads
         if self.decoder_name == "mlp":
             self.decoder = nn.Sequential(
-                nn.Linear(self.latent_dim, self.dec_hidden_dim),
+                nn.Linear(self.latent_dim, self.dec_hidden_dim[0] * self.dec_hidden_dim[1] * self.dec_hidden_dim[2]),
                 nn.ReLU(),
                 # nn.Unflatten(1, (self.dec_hidden_dim)),
                 self.decoder_raw
@@ -226,7 +233,7 @@ class DeepTaxonNet(nn.Module):
         # initialize with normal distribution
         # self.mu_c = nn.Parameter(torch.nn.init.normal_(torch.empty(2**self.n_layers, self.latent_dim), 0, 0.6))  # Init uniform
 
-        limit = -6
+        limit = self.logvar_init_range
         self.logvar_c = nn.Parameter(torch.nn.init.uniform_(torch.empty(2**self.n_layers, self.latent_dim), limit, limit+1))  # Init uniform
         # self.mu_c = nn.Parameter(torch.zeros(2**self.n_layers, self.latent_dim))  # Init uniform
 
@@ -248,6 +255,7 @@ class DeepTaxonNet(nn.Module):
         return recon_loss
 
     def encode(self, x):
+        # x = self.pretrained(x)
         h = self.encoder(x)
         # print(f"encoder output range: {h.min()} {h.max()}")
         mu = self.fc_mu(h)
@@ -265,12 +273,17 @@ class DeepTaxonNet(nn.Module):
     
     def decode(self, z):
         x = self.decoder(z)
-        if self.decoder_name == "mlp":
-            x = x.view(-1, 3, 32, 32)
+        # if self.decoder_name == "mlp":
+            # x = x.view(-1, 3, 32, 32)
         return x
     
 
     def forward(self, x, tau=1.0):
+        if self.pretrained_encoder:
+            with torch.no_grad():
+                x = self.pretrained(x)
+        # print the range of x
+        # x_noisy = utils.add_noise(x, 0, 'gaussian') 
         mu, logvar = self.encode(x) # shape: (batch_size, latent_dim)
         # mu = (mu - mu.min()) / mu.std() # normalize mu
         # range for logvar

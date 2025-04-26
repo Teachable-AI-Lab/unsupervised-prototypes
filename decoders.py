@@ -116,12 +116,12 @@ class ResNet20LightDecoder(nn.Module):
 #       MLP Decoder                #
 ####################################
 class MLPDecoder(nn.Module):
-    def __init__(self, latent_dim, hidden_dim, input_dim):
+    def __init__(self, hidden_dim, input_dim):
         super(MLPDecoder, self).__init__()
         self.decoder = nn.Sequential(
             # nn.Linear(latent_dim, hidden_dim),
             # nn.ReLU(),
-            nn.Linear(hidden_dim, 128),
+            nn.Linear(hidden_dim[0] * hidden_dim[1] * hidden_dim[2], 128),
             nn.ReLU(),
             nn.Linear(128, 512),
             nn.ReLU(),

@@ -18,13 +18,34 @@ import random
 import json
 import os
 import argparse
+import torchvision.models as models
+from collections import OrderedDict
+
+
+
+def add_noise(x, noise_level=0.1, noise_type='gaussian'):
+    '''
+    x: (batch, C, H, W)
+    noise_type: 'gaussian', 'random_mask'
+    '''
+    if noise_type == 'gaussian':
+        noise = torch.randn_like(x) * noise_level
+        x_noisy = x + noise
+    elif noise_type == 'random_mask':
+        # Create a random mask
+        mask = torch.rand_like(x) < noise_level
+        # Apply the mask to the input
+        x_noisy = x * mask
+    else:
+        raise ValueError("Unsupported noise type. Use 'gaussian' or 'random_mask'.")
+    return x_noisy
 
 # ------------------------------
 # KL Annealing Scheduler (Linear)
 # ------------------------------
 def linear_annealing(epoch, anneal_epochs=50):
     # Increase beta linearly until it reaches 1.0
-    return min(1.0, (epoch+1) / anneal_epochs)
+    return min(1.0, (epoch) / anneal_epochs)
 
 def convex_weight_decay(n_layes, _lambda):
     weights = []
@@ -193,9 +214,10 @@ def label_annotation(model, support_loader, n_classes, device):
         pcx_c = pcx_c.sum(dim=0) # shape: (n_nodes, )
 
         annotation[c, :] = pcx_c
-
     
-
+    # only look at the leaves
+    # annotation = annotation[:, n_nodes // 2:]
+    # print(f"annotation shape: {annotation.shape}")
     # normlize the annotation on each column
     annotation = annotation / torch.sum(annotation, dim=0, keepdim=True)
 
@@ -218,6 +240,8 @@ def basic_node_evaluation(model, annotation, query_loader, device):
 
     pcx = torch.cat(pcx, dim=0) # shape: (N, n_nodes)
     labels = torch.cat(labels, dim=0) # shape: (N, )
+
+    # pcx = pcx[:, pcx.shape[1] // 2] # only look at the leaves
 
     # find argmax of pcx
     # pred = pcx.argmax(dim=1) # shape: (N, ) # return index? Answer: yes
@@ -357,14 +381,14 @@ def get_latent(model, test_loader, device):
             data = data.to(device)
             mu, logvar = model.encode(data)
             latent = model.reparameterize(mu, logvar)
-            all_latent.append(latent)
+            all_latent.append(latent.detach().cpu())
             all_labels.append(target)
 
             _, recon_loss, kl1, kl2, H, pcx, pi, _ = model(data)
-            all_pcx.append(pcx)
+            all_pcx.append(pcx.detach().cpu())
             pis = pi.detach().cpu().numpy()
             # pis.append(pi)
-            if i == 1:
+            if i == 0:
                 break
     with torch.no_grad():
         mu_c = model.gmm_params()[1]
@@ -614,7 +638,8 @@ def GumbelSoftmax(logits, tau=1, alpha=1, hard=False, dim=-1):
 
 
 def get_data_loader(dataset, batch_size, normalize, 
-                    N_WAY_TEST=5, K_SHOT_TEST=1, N_QUERY_TEST=15, N_TEST_EPISODES=600):
+                    N_WAY_TEST=5, K_SHOT_TEST=1, N_QUERY_TEST=15, N_TEST_EPISODES=600,
+                    train_subset=1):
     # Always download if not present
     download = True
     # Convert dataset name to lowercase for flexible input
@@ -684,7 +709,19 @@ def get_data_loader(dataset, batch_size, normalize,
             transform = transforms.Compose([
                 transforms.ToTensor()
             ])
-    elif dataset == 'stl10':
+    # elif dataset == 'stl10':
+    #     dataset_class = datasets.STL10
+    #     data_dir = 'data/STL10'
+    #     if normalize:
+    #         transform = transforms.Compose([
+    #             transforms.ToTensor(),
+    #             transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+    #         ])
+    #     else:
+    #         transform = transforms.Compose([
+    #             transforms.ToTensor()
+    #         ])
+    elif dataset == 'stl-10' or dataset == 'stl-10-eval':
         dataset_class = datasets.STL10
         data_dir = 'data/STL10'
         if normalize:
@@ -728,12 +765,32 @@ def get_data_loader(dataset, batch_size, normalize,
         )
         # radnomly split the dataset into 2 parts: 80% for training and 20% for testing
 
+    elif dataset == 'svhn':
+        # SVHN has train and test splits
+        train_set = dataset_class(root=data_dir, split='train', download=download, transform=transform)
+        test_set = dataset_class(root=data_dir, split='test', download=download, transform=transform)
+        # radnomly split the dataset into 2 parts: 80% for training and 20% for testing
+
+    elif dataset == 'stl-10':
+        # STL-10 has train and test splits
+        train_set = dataset_class(root=data_dir, split='unlabeled', download=download, transform=transform)
+        test_set = dataset_class(root=data_dir, split='test', download=download, transform=transform)
+        # radnomly split the dataset into 2 parts: 80% for training and 20% for testing
+
+    elif dataset == 'stl-10-eval':
+        train_set = dataset_class(root=data_dir, split='train', download=download, transform=transform)
+        test_set = dataset_class(root=data_dir, split='test', download=download, transform=transform)
     else:
     # Create the training and testing datasets
         train_set = dataset_class(root=data_dir, train=True, download=download, transform=transform)
         test_set = dataset_class(root=data_dir, train=False, download=download, transform=transform)
 
     # Create DataLoaders for training and testing
+    # randomly select train_subset of the training set
+    if train_subset < 1:
+        indices = np.random.choice(len(train_set), int(len(train_set) * train_subset), replace=False)
+        train_set = torch.utils.data.Subset(train_set, indices)
+        print(f"Using {len(train_set)} samples for training.")
     train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True,
                               num_workers=4, pin_memory=True)
     if dataset == 'omniglot':
@@ -743,7 +800,7 @@ def get_data_loader(dataset, batch_size, normalize,
             num_workers=0 # Often safer for IterableDatasets, adjust if needed
         )
     else:
-        test_loader = DataLoader(test_set, batch_size=batch_size * 8, shuffle=False,
+        test_loader = DataLoader(test_set, batch_size=batch_size * 2, shuffle=False,
                              num_workers=4, pin_memory=True)
 
     return train_loader, test_loader, train_set, test_set
@@ -1029,3 +1086,303 @@ class EpisodeDataset(IterableDataset):
               based on the logic within __iter__.
         """
         return self.n_episodes_per_epoch
+    
+
+def get_pretrained(model_name):
+    checkpoint_path = '/nethome/zwang910/file_storage/nips-2025/deep-taxon/pretrained/'
+    model_name = model_name
+    model = models.resnet50(pretrained=False)
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    # --- 2. Load the Checkpoint File ---
+    print(f"Loading checkpoint from: {checkpoint_path}")
+    # Load onto CPU first to make key inspection and processing easier
+    checkpoint = torch.load(checkpoint_path + model_name, map_location=device)
+
+    # --- 3. Extract and Process the State Dictionary ---
+    if 'state_dict' not in checkpoint:
+        # If 'state_dict' is not found, maybe the checkpoint *is* the state_dict
+        if isinstance(checkpoint, dict):
+            print("Warning: Checkpoint does not contain 'state_dict' key. Assuming the loaded object IS the state_dict.")
+            original_state_dict = checkpoint
+        else:
+            raise KeyError(f"Checkpoint does not seem to be a dictionary or contain the key 'state_dict'. Found type: {type(checkpoint)}")
+    else:
+        original_state_dict = checkpoint['state_dict']
+        print("Extracted state_dict from checkpoint.")
+
+    # *** CRITICAL STEP: Determine the correct prefix to remove ***
+    # Inspect the keys of your specific checkpoint file to find the correct prefix.
+    # Common prefixes for SimCLR models trained with distributed training:
+    # 'module.encoder.', 'module.backbone.', 'encoder.', 'backbone.'
+    # Uncomment the next line to print the first few keys and check:
+    # print("First 10 keys from checkpoint state_dict:", list(original_state_dict.keys())[:10])
+
+    prefix_to_remove = "backbone." # <--- ADJUST THIS BASED ON YOUR INSPECTION!
+    print(f"Attempting to remove prefix: '{prefix_to_remove}'")
+
+    new_state_dict = OrderedDict()
+    keys_matched = 0
+    keys_unmatched_printed = 0
+    for k, v in original_state_dict.items():
+        if k.startswith(prefix_to_remove):
+            # Remove the prefix to match the standard ResNet-50 key names
+            name = k[len(prefix_to_remove):]
+            new_state_dict[name] = v
+            keys_matched += 1
+        else:
+            # Keep track of keys that didn't match the prefix, might be projection head etc.
+            if keys_unmatched_printed < 5: # Print first few unmatched keys
+                print(f"  - Key '{k}' did not match prefix, skipping for standard ResNet load.")
+                keys_unmatched_printed +=1
+            elif keys_unmatched_printed == 5:
+                print("  - (Further unmatched keys omitted)...")
+                keys_unmatched_printed += 1
+            # You could choose to add non-prefixed keys if needed, but for loading
+            # into standard ResNet, we usually only want the backbone weights.
+            # new_state_dict[k] = v # Uncomment this line if you expect non-prefixed keys to also be loaded
+
+    if keys_matched == 0:
+        print(f"\nWARNING: No keys matched the prefix '{prefix_to_remove}'.")
+        print("Please MANUALLY INSPECT the keys in your checkpoint and adjust `prefix_to_remove`.")
+        print("Checkpoint keys sample:", list(original_state_dict.keys())[:10])
+        # If you are sure there's no prefix, you might comment out the processing loop
+        # and use: new_state_dict = original_state_dict
+    else:
+        print(f"Processed {keys_matched} keys by removing prefix '{prefix_to_remove}'")
+
+
+    # --- 4. Load the Processed State Dictionary into the Model ---
+    print("Loading processed state_dict into the ResNet-50 model...")
+
+    # Use strict=False. This is important because:
+    #  - The SimCLR state_dict usually contains only the backbone weights, lacking the final 'fc' layer of the standard ResNet.
+    #  - The original SimCLR checkpoint might contain weights for a projection head (e.g., 'projector.fc1.weight') which are not in the standard ResNet.
+    # `strict=False` allows loading the weights that *do* match, ignoring the missing 'fc' keys and unexpected projection head keys.
+    load_result = model.load_state_dict(new_state_dict, strict=False)
+
+    # Report missing/unexpected keys to understand what was loaded
+    print("\n--- Load State Dict Results ---")
+    if not load_result.missing_keys:
+        print("  - No missing keys.")
+    else:
+        print(f"  - Missing keys ({len(load_result.missing_keys)}): {load_result.missing_keys}")
+        if 'fc.weight' in load_result.missing_keys or 'fc.bias' in load_result.missing_keys:
+            print("     (INFO: Missing 'fc.weight'/'fc.bias' is expected as SimCLR checkpoint contains backbone weights).")
+
+    if not load_result.unexpected_keys:
+        print("  - No unexpected keys.")
+    else:
+        print(f"  - Unexpected keys ({len(load_result.unexpected_keys)}): {load_result.unexpected_keys}")
+        print("     (INFO: Unexpected keys might correspond to SimCLR projection head layers not present in standard ResNet).")
+    print("--- End Load State Dict Results ---")
+
+
+    # --- Final Steps ---
+    # Move the model to the appropriate device
+    model.to(device)
+
+    # Set the model to evaluation mode (disables dropout, uses running stats for BatchNorm)
+    model.eval()
+    model.fc = torch.nn.Identity()  # Remove the final classification layer
+
+    print(f"\nSuccessfully loaded weights into model = models.resnet50(pretrained=False/weights=None).")
+    print(f"Model is on device '{device}' and in evaluation mode.")
+
+    # return model
+    return model
+
+def compute_dendrogram_purity(model, dataloader, label_annotation_matrix, device):
+    """
+    Compute dendrogram purity using a Monte Carlo approximation.
+
+    Parameters:
+        model: DeepTaxonNet instance
+        dataloader: DataLoader for evaluation
+        label_annotation_matrix: Tensor of shape (n_classes, n_nodes)
+        device: torch.device
+    
+    Returns:
+        float: Approximate dendrogram purity
+    """
+    from itertools import combinations
+    import random
+
+    model.eval()
+    pcx_list, label_list = [], []
+
+    with torch.no_grad():
+        for x, y in dataloader:
+            x = x.to(device)
+            _, _, _, _, _, pcx_batch, _, _ = model(x)
+            pcx_list.append(pcx_batch.cpu())
+            label_list.append(y)
+
+    pcx = torch.cat(pcx_list, dim=0)  # (N, n_nodes)
+    labels = torch.cat(label_list, dim=0)  # (N,)
+    n_nodes = pcx.shape[1]
+
+    def lca_index(idx1, idx2):
+        """Returns the least common ancestor index in a binary heap."""
+        while idx1 != idx2:
+            if idx1 > idx2:
+                idx1 = (idx1 - 1) // 2
+            else:
+                idx2 = (idx2 - 1) // 2
+        return idx1
+
+    def descendant_leaves(lca_idx):
+        """Return all descendant leaf indices under a given LCA index."""
+        # Assumes a complete binary tree; leaves are in the bottom layer
+        leaves = []
+        queue = [lca_idx]
+        while queue:
+            node = queue.pop(0)
+            left = 2 * node + 1
+            right = 2 * node + 2
+            if left >= n_nodes:
+                leaves.append(node)
+            else:
+                queue.extend([left, right])
+        return leaves
+
+    label_to_indices = defaultdict(list)
+    for i, label in enumerate(labels):
+        label_to_indices[int(label)].append(i)
+
+    sample_pairs = []
+    for indices in label_to_indices.values():
+        if len(indices) >= 2:
+            sampled = random.sample(list(combinations(indices, 2)), min(100, len(indices) * (len(indices) - 1) // 2))
+            sample_pairs.extend(sampled)
+
+    purity_sum = 0
+    for i, j in sample_pairs:
+        node_i = pcx[i].argmax().item()
+        node_j = pcx[j].argmax().item()
+        lca = lca_index(node_i, node_j)
+        desc = descendant_leaves(lca)
+        label = labels[i].item()
+        count_label = sum(label_annotation_matrix[label][leaf].item() for leaf in desc)
+        total = sum(label_annotation_matrix[:, leaf].sum().item() for leaf in desc)
+        purity = count_label / total if total > 0 else 0
+        purity_sum += purity
+
+    return purity_sum / len(sample_pairs)
+
+
+from collections import defaultdict
+
+def compute_leaf_purity(model, dataloader, device='cuda'):
+    """
+    Computes the soft leaf purity for GMMDeepTaxonNet.
+    Uses soft cluster assignments (p(c|x)) and true labels instead of hard assignments.
+    For every sample x  we obtain the soft cluster probabilities p(c | x)
+    For each leaf node, we compute the purity as the maximum soft assignment
+    to the true class label divided by the total weight of that leaf.
+
+    The overall leaf purity is the weighted average of the per-leaf purities.
+
+    Args:
+        model: GMMDeepTaxonNet model with a forward() method returning p(c|x)
+        dataloader: DataLoader with (x, y) batches from test set
+        device: 'cuda' or 'cpu'
+
+    Returns:
+        overall_leaf_purity: float
+        per_leaf_purities: dict of {leaf_idx: (purity, total_weight)}
+    """
+    model.eval()
+    model.to(device)
+
+    # These collect all p(c|x) rows and the corresponding ground-truth labels
+    all_probs = []
+    all_labels = []
+
+    with torch.no_grad():
+        for x_batch, y_batch in dataloader:
+            x_batch = x_batch.to(device)
+            y_batch = y_batch.to(device)
+
+            output = model(x_batch)
+
+             # Handle the fact that different forward() variants return different outputs. We only care about pcx
+            pcx = next(
+                t for t in output
+                if torch.is_tensor(t) and t.dim() == 2 and t.size(0) == x_batch.size(0)
+            )
+
+            all_probs.append(pcx.cpu())
+            all_labels.append(y_batch.cpu())
+
+
+    # Stack everything: shapes → (N, L) and (N,)
+    all_probs = torch.cat(all_probs, dim=0)     # (N, L)
+    all_labels = torch.cat(all_labels, dim=0)   # (N,)
+    num_leaves = all_probs.shape[1]
+
+    # Build soft class histograms per leaf with  dictionary
+    leaf_class_weights = defaultdict(lambda: defaultdict(float))
+    leaf_total_weights = defaultdict(float)
+
+    for i in range(len(all_labels)):
+        label = int(all_labels[i])
+        for leaf_idx in range(num_leaves):
+            weight = float(all_probs[i, leaf_idx])
+            leaf_class_weights[leaf_idx][label] += weight
+            leaf_total_weights[leaf_idx] += weight
+
+    # Compute purity per leaf
+    per_leaf_purities = {}
+    weighted_sum = 0.0
+    total_weight = sum(leaf_total_weights.values())
+
+    for leaf_idx in range(num_leaves):
+        if leaf_total_weights[leaf_idx] == 0:
+            purity = 0.0
+        else:
+            max_class_weight = max(leaf_class_weights[leaf_idx].values(), default=0.0)
+            purity = max_class_weight / leaf_total_weights[leaf_idx]
+
+        per_leaf_purities[leaf_idx] = (purity, leaf_total_weights[leaf_idx])
+        weighted_sum += purity * leaf_total_weights[leaf_idx]
+
+    overall_leaf_purity = weighted_sum / total_weight if total_weight > 0 else 0.0
+    return overall_leaf_purity, per_leaf_purities
+
+from sklearn.metrics import normalized_mutual_info_score
+
+def compute_nmi(model, annotation, dataloader, device):
+    """
+    Computes the Normalized Mutual Information (NMI) between model cluster assignments and true labels.
+    
+    Args:
+        model: DeepTaxonNet model
+        annotation: label_annotation matrix (n_classes x n_nodes)
+        dataloader: DataLoader for evaluation
+        device: torch.device
+        
+    Returns:
+        float: NMI score
+    """
+    model.eval()
+    all_preds = []
+    all_labels = []
+
+    with torch.no_grad():
+        for images, labels in dataloader:
+            images = images.to(device)
+            _, _, _, _, _, pcx_batch, _, _ = model(images)
+            pcx_batch = pcx_batch.detach().cpu()
+            
+            # Soft prediction using annotation
+            preds = pcx_batch @ annotation.T  # (batch_size, n_classes)
+            preds = preds.argmax(dim=1)       # Pick the best predicted class
+            
+            all_preds.append(preds)
+            all_labels.append(labels)
+
+    all_preds = torch.cat(all_preds, dim=0).numpy()
+    all_labels = torch.cat(all_labels, dim=0).numpy()
+
+    nmi_score = normalized_mutual_info_score(all_labels, all_preds)
+    return nmi_score
