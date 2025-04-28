@@ -13,14 +13,15 @@ import matplotlib.pyplot as plt
 # tsne and pca
 from sklearn.manifold import TSNE
 from sklearn.decomposition import PCA
-import untils
-from DeepTaxonNet import CobwebNN, CobwebNNTreeLayer, TestModel
+import utils
+from DeepTaxonNet import DeepTaxonNet
 import argparse
 import os
 import sys
 import wandb
+import json
 
-MODEL_SAVE_PATH_PREFIX = '/home/zwang910/file_storage/nips-2025/deep-taxon/project-checkin'
+MODEL_SAVE_PATH_PREFIX = '/nethome/zwang910/file_storage/nips-2025/deep-taxon/project-checkin'
 
 def set_seed(seed):
     torch.manual_seed(seed)
@@ -33,36 +34,75 @@ def set_seed(seed):
 
 #######################################################
 # define args
-parser = argparse.ArgumentParser()
-## Training args
-parser.add_argument('--seed', type=int, default=0)
-parser.add_argument('--batch_size', type=int, default=128)
-parser.add_argument('--epochs', type=int, default=100)
-parser.add_argument('--lr', type=float, default=2e-4)
-parser.add_argument('--model_save_path', type=str, default='')
-parser.add_argument('--model_save_interval', type=int, default=20)
-parser.add_argument('--device_id', type=int, default=0)
-parser.add_argument('--linear_probing_lr', type=float, default=5e-2)
-parser.add_argument('--linear_probing_epochs', type=int, default=50)
-## Model args
-parser.add_argument('--n_layers', type=int, default=8)
-parser.add_argument('--n_hidden', type=int, default=512)
-parser.add_argument('--kl_weight', type=float, default=200.0)
-parser.add_argument('--tau', type=float, default=1.0)
-parser.add_argument('--commitment_weight', type=float, default=1.0)
-parser.add_argument('--loss_fn', type=str, default='mse') # or bce # We use MSE
-parser.add_argument('--layer_wise_loss', type=bool, default=False)
-parser.add_argument('--sampling', type=bool, default=False)
-parser.add_argument('--simple_encoder', type=bool, default=False)
-## Data args
-parser.add_argument('--dataset', type=str, default='cifar-10')
-parser.add_argument('--normalize', type=bool, default=False)
-## Wandb args
-parser.add_argument('--wandb', type=bool, default=False)
-parser.add_argument('--wandb_project', type=str, default='deep-taxon')
-parser.add_argument('--wandb_run_name', type=str, default='mse-unnormalized')
+# parser = argparse.ArgumentParser()
+# ## Training args
+# parser.add_argument('--seed', type=int, default=0)
+# parser.add_argument('--batch_size', type=int, default=128)
+# parser.add_argument('--epochs', type=int, default=300)
+# parser.add_argument('--lr', type=float, default=5e-4)
+# parser.add_argument('--model_save_path', type=str, default='')
+# parser.add_argument('--model_save_interval', type=int, default=20)
+# parser.add_argument('--device_id', type=int, default=0)
+# parser.add_argument('--lr_scheduler', type=str, default='none') # none, step, cosine, linear-up, linear-down
+# parser.add_argument('--linear_probing_lr', type=float, default=1e-2)
+# parser.add_argument('--linear_probing_epochs', type=int, default=50)
+# parser.add_argument('--n_classes', type=int, default=10)
+# parser.add_argument('--pretraining_epochs', type=int, default=0)
+# parser.add_argument('--pretraining_lr', type=float, default=1e-3)
+# parser.add_argument('--kl1_weight', type=float, default=1.0)
+# parser.add_argument('--recon_weight', type=float, default=1.0)
+# parser.add_argument('--vade_baseline', type=bool, default=False)
+# ## Model args
+# parser.add_argument('--n_layers', type=int, default=4)
+# parser.add_argument('--latent_dim', type=int, default=10)
+# parser.add_argument('--input_dim', type=int, default=1*28*28)
+# parser.add_argument('--enc_hidden_dim', type=int, default=128*1*1)
+# parser.add_argument('--dec_hidden_dim', type=tuple, default=(128,1,1))
+# parser.add_argument('--encoder_name', type=str, default='omniglot')
+# parser.add_argument('--decoder_name', type=str, default='omniglot')
+# parser.add_argument('--dkl_margin', type=float, default=0.1)
+# parser.add_argument('--dkl_weight_lambda', type=float, default=0.1)
+# parser.add_argument('--convex_weight_lambda', type=float, default=0.1)
+# ## Data args
+# parser.add_argument('--dataset', type=str, default='fashion-mnist')
+# parser.add_argument('--normalize', type=bool, default=False)
+# ## Wandb args
+# parser.add_argument('--wandb', type=bool, default=False)
+# parser.add_argument('--wandb_project', type=str, default='deep-taxon')
+# parser.add_argument('--wandb_run_name', type=str, default='VaDE-taxon')
 
-args = parser.parse_args()
+# args = parser.parse_args()
+
+parser = argparse.ArgumentParser(
+    description="Train Deep TaxonNet using configuration from a JSON file."
+)
+parser.add_argument(
+    '--config',
+    type=str,
+    required=True,
+    help='Path to the JSON configuration file.'
+)
+
+# Parse the command line to get the config file path
+initial_args = parser.parse_args()
+
+# Load the actual configuration from the specified JSON file
+try:
+    args = utils.load_config_from_json(initial_args.config)
+except (FileNotFoundError, ValueError) as e:
+    parser.error(str(e)) # Display error through argparse system
+
+# --- Configuration is loaded into 'args' ---
+print("Configuration loaded successfully:")
+print("-" * 30)
+# Print all loaded args and their types
+for key, value in sorted(vars(args).items()): # Sort for consistent output
+    print(f"  {key}: {value} (Type: {type(value).__name__})")
+print("-" * 30)
+
+
+
+
 set_seed(args.seed)
 device = torch.device(f"cuda:{args.device_id}" if torch.cuda.is_available() else "cpu")
 
@@ -72,141 +112,225 @@ if args.wandb:
     wandb.init(project=args.wandb_project, name=args.wandb_run_name)
     wandb.config.update(args)
 
-print(args.normalize)
-print(f"layer_wise_loss: {args.layer_wise_loss}")
 #######################################################
 
 # define data loader
 print('Loading data...')
-train_loader, test_loader, train_data, test_data = untils.get_data_loader(args.dataset, args.batch_size, args.normalize)
+train_loader, test_loader, train_data, test_data = utils.get_data_loader(args.dataset, args.batch_size, args.normalize)
 
 # define model
-n_layers = args.n_layers
-n_hidden = args.n_hidden
-image_shape = (3, 32, 32)
-image_shape_prod = image_shape[0] * image_shape[1] * image_shape[2]
-cobweb = CobwebNN(image_shape=image_shape, n_layers=n_layers, n_hidden=n_hidden,
-                  disable_decoder_sigmoid=args.normalize, tau=args.tau, 
-                  layer_wise=args.layer_wise_loss, sampling=args.sampling, simple_encoder=args.simple_encoder
-                  ).to(device)
+model = DeepTaxonNet(
+    n_layers=args.n_layers,
+    input_dim=args.input_dim,
+    enc_hidden_dim=args.enc_hidden_dim,
+    dec_hidden_dim=args.dec_hidden_dim,
+    latent_dim=args.latent_dim,
+    encoder_name=args.encoder_name,
+    decoder_name=args.decoder_name,
+    kl1_weight=args.kl1_weight,
+    recon_weight=args.recon_weight,
+    dkl_margin=args.dkl_margin,
+    dkl_weight_lambda=args.dkl_weight_lambda,
+    convex_weight_lambda=args.convex_weight_lambda,
+    vade_baseline=args.vade_baseline,
+    pretrained_encoder=args.pretrained_encoder,
+    logvar_init_range=args.logvar_init_range,
+).to(device)
 
-# # print model's device
-# print(f'Model device: {next(cobweb.parameters()).device}')
+# pretraining only on encoder and decoder
+if args.pretraining_epochs > 0:
+    print('Pretraining encoder and decoder for {} epochs...'.format(args.pretraining_epochs))
+    # optimizer_pretrain = optim.AdamW(
+    #     list(model.encoder.parameters()) + 
+    #     list(model.decoder.parameters()) + 
+    #     list(model.fc_mu.parameters()),
+    #     lr=args.pretraining_lr
+    # )
+    # utils.pretrain(model, train_loader, optimizer_pretrain, args.pretraining_epochs, device) 
+    optimizer_pretrain = optim.AdamW(model.parameters(), lr=args.pretraining_lr)
+    utils.pretrain(model, train_loader, optimizer_pretrain, args.pretraining_epochs, device)
 
 # define optimizer
-optimizer = optim.AdamW(cobweb.parameters(), lr=args.lr)
+optimizer = optim.AdamW(model.parameters(), lr=args.lr)
+scheduler = None
+if args.lr_scheduler == 'step':
+    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=100, gamma=0.5)
+elif args.lr_scheduler == 'linear-up':
+    scheduler = optim.lr_scheduler.LinearLR(optimizer, start_factor=1.0, end_factor=0.1, total_iters=args.epochs)
+elif args.lr_scheduler == 'linear-down':
+    scheduler = optim.lr_scheduler.LinearLR(optimizer, start_factor=0.1, end_factor=1.0, total_iters=args.epochs)
+elif args.lr_scheduler == 'cosine':
+    scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs, eta_min=2e-5)
+    
 
 print('Start training...')
 steps = 0
 epochs = args.epochs
 for epoch in range(epochs):
     print(f'Epoch {epoch}')
+    model.train()
     for j, (data, target) in enumerate(train_loader):
-        # cobweb.train()
+        # model.train()
         optimizer.zero_grad()
 
         data = data.to(device)
-        x, means, logvars, x_preds, p_x_nodes, p_node_xs, x_latent, _ = cobweb(data)
-        loss = 0
-        PTY = 0
-        CMT = 0
-        REC = 0
-        KL = 0
-        # break
-        H = 0
 
-        ########### layer-wise loss ############
-        if args.layer_wise_loss:
-            # print(len(means), len(logvars), len(x_preds), len(p_x_nodes), len(p_node_xs))
-            for i, (mean, logvar, x_pred, p_node_x) in enumerate(zip(means, logvars, x_preds, p_node_xs)):
-                # reconstruction loss
-                if args.loss_fn == 'mse':
-                    REC += F.mse_loss(x_pred.view(-1, image_shape_prod), data.view(-1, image_shape_prod))
-                elif args.loss_fn == 'bce': # can't use this if the data is normalized
-                    REC += F.binary_cross_entropy(x_pred.view(-1, image_shape_prod), data.view(-1, image_shape_prod))
-                # prototype loss
-                # PTY += ((x_latent.detach().unsqueeze(1) - mean.unsqueeze(0)).pow(2).mean(dim=-1) * p_node_x).sum(dim=-1).mean()
-                # commitment loss
-                # CMT += ((x_latent.unsqueeze(1) - mean.detach().unsqueeze(0)).pow(2).mean(dim=-1) * p_node_x).sum(dim=-1).mean()
-                if args.sampling:
-                    # maximize the logprob of x_latent given the means and logvars
-                    #  dist = -0.5 * torch.sum(logvars_cat + ((x_mu.unsqueeze(1) - means_cat.unsqueeze(0)) ** 2) / torch.exp(logvars_cat), dim=-1)
-                    CMT += 0.5 * torch.sum(logvar + ((x_latent.unsqueeze(1) - mean.unsqueeze(0)) ** 2) / torch.exp(logvar), dim=-1).mean()
-                else:
-                    CMT += ((x_latent.unsqueeze(1) - mean.unsqueeze(0)).pow(2).mean(dim=-1) * p_node_x).sum(dim=-1).mean()
-                KL += untils.cross_entropy_regularization(p_node_x, depth=n_layers - i, lambda_=args.kl_weight)
-                # print(f"layer {i}: KL: {KL}")
+        # beta = utils.linear_annealing(steps, anneal_epochs=40000)     
+        # model.kl1_weight = beta
 
-            loss += REC + args.commitment_weight * CMT + KL
+        # if epoch < 10:
+        #     model.noise_strength = 0.0
+        # elif epoch < 30:
+        #     model.noise_strength = 0.1
+        # elif epoch < 50:
+        #     model.noise_strength = 0.2
 
-        ########### tree-wise loss ############
-        else:
-            # means: 2**n_layers-1, n_hidden
-            # logvars: 2**n_layers-1, n_hidden
-            # x_preds: B, 512, 1, 1
-            # p_node_xs: B, 2**n_layers-1
-            # reconstruction loss
-            if args.loss_fn == 'mse':
-                REC = F.mse_loss(x_preds.view(-1, image_shape_prod), data.view(-1, image_shape_prod))
-            elif args.loss_fn == 'bce': # can't use this if the data is normalized
-                REC = F.binary_cross_entropy(x_preds.view(-1, image_shape_prod), data.view(-1, image_shape_prod))
-            # prototype loss
-            # PTY = ((x_latent.detach().unsqueeze(1) - torch.cat(means, dim=0).unsqueeze(0)).pow(2).mean(dim=-1) * p_node_xs).sum(dim=-1).mean()
-            # commitment loss
-            # CMT = ((x_latent.unsqueeze(1) - torch.cat(means, dim=0).detach().unsqueeze(0)).pow(2).mean(dim=-1) * p_node_xs).sum(dim=-1).mean()
-            if args.sampling:
-                # maximize the logprob of x_latent given the means and logvars
-                #  dist = -0.5 * torch.sum(logvars_cat + ((x_mu.unsqueeze(1) - means_cat.unsqueeze(0)) ** 2) / torch.exp(logvars_cat), dim=-1)
-                CMT += 0.5 * torch.sum(logvars + ((x_latent.unsqueeze(1) - torch.cat(means, dim=0).unsqueeze(0)) ** 2) / torch.exp(logvars), dim=-1).mean()
-            else:
-                CMT += ((x_latent.unsqueeze(1) - torch.cat(means, dim=0).unsqueeze(0)).pow(2).mean(dim=-1) * p_node_xs).sum(dim=-1).mean()
-            KL = untils.cross_entropy_regularization(p_node_xs, depth=n_layers + 1, lambda_=args.kl_weight, entire_tree=(not args.layer_wise_loss))
-            # print(f"KL: {KL}")
-            loss = REC + args.commitment_weight * CMT + KL
-            # print(p_node_xs.shape)
-            # print(torch.cat(means, dim=0).shape)
+        
+        # recon_weight, kl1_weight = utils.get_loss_weights(steps, 0, 5, 'dkl')
+        # model.kl1_weight = kl1_weight
+        # model.recon_weight = recon_weight
+
+        ## psuedo code
+        # x_aug_1 = utils.data_augmentation(data)
+        # x_aug_2 = utils.data_augmentation(data)
+        # x_aug = torch.cat((x_aug_1, x_aug_2), dim=0) # shape (2*batch_size, 1, 28, 28)
+        # do SimCLR
+
+        loss, recon_loss, kl1, kl2, _, _, _, _ = model(data)  
+
+        # z: shape (2*batch_size, latent_dim)
+        # compute contrastive loss
+        # sim_score = torch.matmul(z_contrastive, z_contrastive.T) / 0.5
+        # compute NT-Xent loss
+
+
+         
+
+
+
 
         if args.wandb:
-            wandb.log({'loss': loss.item(), 
-                       'rec_loss': REC.item(), 
-                       'kl_loss': KL.item(), 
-                       'pty_loss': PTY,
-                       'cmt_loss': CMT.item(),
-                       'steps': steps}
-                       )
+            wandb.log({'loss': loss.item(),
+                        'recon_loss': recon_loss.item(),
+                        'kl1': -kl1.item(),
+                        'kl2': -kl2.item(),
+                        # 'beta': model.logvar_x.item(),
+                       'steps': steps})
 
         loss.backward()
         optimizer.step()
         steps += 1
-        # break
 
-        # all_losses.append(loss.item())
-        # all_rec_losses.append(REC.item())
-        # all_kl_losses.append(KL.item())
-        # all_pty_losses.append(PTY.item())
-        # all_cmt_losses.append(CMT.item())
     # for every epoch
-    viz_fig = untils.viz_examplar(cobweb, test_data, n_data=1000, device=device, layer=5, k=10, normalize=args.normalize)
-    if args.wandb:
-        wandb.log({'viz_examplar': viz_fig, 'epoch': epoch})
+    if scheduler is not None:
+        scheduler.step()
+    if not args.vade_baseline:
+        pass
+        # if args.dataset == 'omniglot':
+        #     all_latent, all_labels, pcx, pis, centroid_list, H = utils.get_latent(model, train_loader, device)
+        # else:
+        #     all_latent, all_labels, pcx, pis, centroid_list, H = utils.get_latent(model, test_loader, device)
+        # # viz_fig = untils.viz_examplar(model, test_data, n_data=1000, device=device, layer=5, k=10, normalize=args.normalize)
+        # viz_tsne = utils.plot_tsne(all_latent, all_labels)
+        # if args.wandb:
+        #     wandb.log({'t-sne': wandb.Image(viz_tsne), 'epoch': epoch})
 
-    viz_centroids = untils.viz_examplar(cobweb, test_data, n_data=1000, device=device, layer=5, k=10, normalize=args.normalize, do_centroids=True)
-    if args.wandb:
-        wandb.log({'viz_centroids': viz_centroids, 'epoch': epoch})
+        # viz_pcx = utils.plot_qcx(pcx)
+        # if args.wandb:
+        #     wandb.log({'viz_pcx': wandb.Image(viz_pcx), 'epoch': epoch})
 
-    
+        # # viz_pi = utils.plot_pi(pis)
+        # # if args.wandb:
+        # #     wandb.log({'viz_pi': wandb.Image(viz_pi), 'epoch': epoch})
+
+        # viz_entropy = utils.plot_entropy(H)
+        # if args.wandb:
+        #     wandb.log({'viz_entropy': wandb.Image(viz_entropy), 'epoch': epoch})
+
+        # for layer in range(5):
+        #     viz_centroid = utils.plot_centroids(centroid_list, layer)
+        #     if args.wandb:
+        #         wandb.log({f'viz_centroid_{layer}': wandb.Image(viz_centroid), 'epoch': epoch})
+            
+        #     viz_gen = utils.plot_generated_examples(model, layer, 10, device)
+        #     if args.wandb:
+        #         wandb.log({f'viz_gen_{layer}': wandb.Image(viz_gen), 'epoch': epoch})
+
+        #     viz_example = utils.plot_dataset_examples(model, all_latent, pcx, layer, 10, device)
+        #     if args.wandb:
+        #         wandb.log({f'viz_example_{layer}': wandb.Image(viz_example), 'epoch': epoch})
 
     # save model every 20 epochs
     if epoch % args.model_save_interval == 0:
-        model_save_path = f'{MODEL_SAVE_PATH_PREFIX}/{args.model_save_path}/'
-        if not os.path.exists(model_save_path):
-            os.makedirs(model_save_path)
+        if not args.vade_baseline:
+            model_save_path = f'{MODEL_SAVE_PATH_PREFIX}/{args.model_save_path}/'
+            if not os.path.exists(model_save_path):
+                os.makedirs(model_save_path)
+            torch.save(model.state_dict(), f'{model_save_path}/deep_taxon_{epoch}.pt')
+            print(f'Model saved at {model_save_path}/deep_taxon_{epoch}.pt')
         # evaluate model via linear probing
-        acc = untils.model_forzen_classification(cobweb, train_data, test_data, device=device, lr=args.linear_probing_lr, epochs=args.linear_probing_epochs, batch_size=args.batch_size)
-        if args.wandb:
-            wandb.log({'linear_probe_acc': acc, 'epoch': epoch})
-        
-        torch.save(cobweb.state_dict(), f'{model_save_path}/deep_taxon_{epoch}.pt')
-        print(f'Model saved at {model_save_path}/deep_taxon_{epoch}.pt')
+        # acc = utils.linear_probing(model, args.n_classes, train_loader, test_loader, lr=args.linear_probing_lr, epochs=args.linear_probing_epochs, device=device)
+        # if args.wandb:
+            # wandb.log({'linear_probe_acc': acc, 'epoch': epoch})
+        if args.dataset == 'omniglot': # few shot learning dataste
+            # 5-way 1-shot classification
+            _, fs_query_loader, _, _ = utils.get_data_loader('omniglot', 256, False,
+                                                            N_WAY_TEST=5,
+                                                            K_SHOT_TEST=1,
+                                                            N_QUERY_TEST=15,
+                                                            N_TEST_EPISODES=1000)
+            acc = utils.testing_few_shot(model, fs_query_loader, device)
+            if args.wandb:
+                wandb.log({'5-way 1-shot acc': acc, 'epoch': epoch})
+            
+            # 5-way 5-shot classification
+            _, fs_query_loader, _, _ = utils.get_data_loader('omniglot', 256, False,
+                                                            N_WAY_TEST=5,
+                                                            K_SHOT_TEST=5,
+                                                            N_QUERY_TEST=15,
+                                                            N_TEST_EPISODES=1000)
+            acc = utils.testing_few_shot(model, fs_query_loader, device)
+            if args.wandb:
+                wandb.log({'5-way 5-shot acc': acc, 'epoch': epoch})
+            
+            # 20-way 1-shot classification
+            _, fs_query_loader, _, _ = utils.get_data_loader('omniglot', 256, False,
+                                                            N_WAY_TEST=20,
+                                                            K_SHOT_TEST=1,
+                                                            N_QUERY_TEST=15,
+                                                            N_TEST_EPISODES=1000)
+            acc = utils.testing_few_shot(model, fs_query_loader, device)
+            if args.wandb:
+                wandb.log({'20-way 1-shot acc': acc, 'epoch': epoch})
+
+            # 20-way 5-shot classification
+            _, fs_query_loader, _, _ = utils.get_data_loader('omniglot', 256, False,
+                                                            N_WAY_TEST=20,
+                                                            K_SHOT_TEST=5,
+                                                            N_QUERY_TEST=15,
+                                                            N_TEST_EPISODES=1000)
+            acc = utils.testing_few_shot(model, fs_query_loader, device)
+            if args.wandb:
+                wandb.log({'20-way 5-shot acc': acc, 'epoch': epoch})
+
+        elif args.dataset == 'stl-10':
+            stl10_train_loader, stl10_test_loader, _, _ = utils.get_data_loader('stl-10-eval', 256, False)
+            annotation = utils.label_annotation(model, stl10_train_loader, args.n_classes, device)
+            acc = utils.basic_node_evaluation(model, annotation, stl10_test_loader, device)
+            if args.wandb:
+                wandb.log({'Accuracy': acc, 'epoch': epoch})
+            
+        else:
+            annotation = utils.label_annotation(model, train_loader, args.n_classes, device)
+            acc = utils.basic_node_evaluation(model, annotation, test_loader, device)
+            if args.wandb:
+                wandb.log({'Accuracy': acc, 'epoch': epoch})
+
+            if args.dataset == 'cifar-10': # try transfer learning
+                cifar100_train_loader, cifar100_test_loader, _, _ = utils.get_data_loader('cifar-100', 256, False)
+                annotation = utils.label_annotation(model, cifar100_train_loader, 100, device)
+                acc = utils.basic_node_evaluation(model, annotation, cifar100_test_loader, device)
+                if args.wandb:
+                    wandb.log({'Transfer to CIFAR-100 accuracy': acc, 'epoch': epoch})
 
         

@@ -1,18 +1,46 @@
 # Deep Taxonomic Networks for Unsupervised Prototype Discovery
-![dtn](./repo_images/dtn.drawio-1.png)
+<!-- ![dtn](./repo_images/dtn.drawio-1.png) -->
+# Training
+Run `python train-deep-taxonnet.py --config ./configs/fmnist.json` to train deep taxonomic network on Fashion-MNIST dataset using default configurations.
+
+Few training configurations to play around:
+- `dataset`: fashion-mnist, mnist, cifar-10
+- `decoder_name`/`decoder_name`: __omniglot__ for 28x28 pixel data, __resnet18__ for 32x32 pixel data
+- `enc_hidden_dim`: 128 for __omniglot__ encoder, 512 for __resnet18__
+- `dec_hidden_dim`: [128, 1, 1] for __omniglot__ encoder, [512, 1, 1] for __resnet18__
+  
+You can use the provided `infer_latent_dim.ipynb` to calculate the dimenstions for images other than 32x32 or 28x28
+
+# Testing
+Load pre-trained models using `testing.ipynb` to calculate ACC, NMI, DP, LP for hierarchical clustering performance.
+
+This repo provides pre-trained models on MNIST and Fashion MNIST under the `./models` folder.
+
+# Visualization
+Load pre-trained models using `viz_gen.ipynb` to visualize (sub-)tree. The provided nodebook can visualzie 1. clusters using the test images, and 2. clusters with model generated images.
+
+# Citations
+- ResNet-18 Encoder-Decoder was adopted (with modification to 32x32 image) from https://github.com/eleannavali/resnet-18-autoencoder (we didn't use the their 'light' version).
 
 ## How to use
 
 The `scripts` folder contains shell commands for training Deep Taxonomic Network model.
+The training configuration is stored as JSON files in the `scripts/configs/` folder
+Run `run_config.sh` in slurm system.
 
-The `encoder-decoder` folder contains several autoencoder architectures for experiments
+<!-- The `encoder-decoder` folder contains several autoencoder architectures for experiments -->
+ `encoder.py` and `decoder.py` stores the encoder and decoder architecure
 
-`MiniDeepTaxonNet.py` is the same model but with vanilla autoencoder model such as simple CNN or simple MLP for the proof of concept experiments.
+<!-- `MiniDeepTaxonNet.py` is the same model but with vanilla autoencoder model such as simple CNN or simple MLP for the proof of concept experiments. -->
 
-`train-autoencoder.py` and `train-deep-taxonnet.py` are the main training loops. The former one trains the autoencoder baseline model.
+`train-deep-taxonnet.py` are the main training loops. The former one trains the autoencoder baseline model.
 
-`DTN-basic-node-eval.ipynb` contains the main basic-level node probing evaluation logic:
-![eval](./repo_images/dtn-eval.drawio-1.png)
+`DeepTaxonNet.py` is the main model.
+
+`utils.py` contains all utility functions.
+
+<!-- `DTN-basic-node-eval.ipynb` contains the main basic-level node probing evaluation logic: -->
+<!-- ![eval](./repo_images/dtn-eval.drawio-1.png) -->
 
 
 ## How to use (Symbolic model)

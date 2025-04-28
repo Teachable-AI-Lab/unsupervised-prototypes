@@ -13,8 +13,6 @@ import matplotlib.pyplot as plt
 import untils
 from encoder_decoder.resnet_encoder import Encoder, BasicBlockEnc
 from encoder_decoder.restnet_decoder import Decoder, BasicBlockDec
-from classes.resnet_using_light_basic_block_encoder import LightEncoder, LightBasicBlockEnc
-from classes.resnet_using_light_basic_block_decoder import LightDecoder, LightBasicBlockDec
 
 ## Maximize predictive prower for each node
 class CobwebNNTreeLayer(nn.Module):
@@ -59,8 +57,7 @@ class CobwebNNTreeLayer(nn.Module):
     
 class CobwebNN(nn.Module):
     def __init__(self, 
-                #  image_shape=(1,28,28), 
-                 input_dim=4,
+                 image_shape=(1,28,28), 
                  n_hidden=128, 
                  n_layers=3, 
                  disable_decoder_sigmoid=False, 
@@ -69,7 +66,7 @@ class CobwebNN(nn.Module):
                  layer_wise=False,
                  simple_encoder=False):
         super(CobwebNN, self).__init__()
-        self.input_dim = input_dim
+        self.image_shape = image_shape
         self.n_hidden = n_hidden
         self.n_layers = n_layers
         self.sampling = sampling
@@ -100,16 +97,24 @@ class CobwebNN(nn.Module):
         if simple_encoder:
             # 
             self.encoder = nn.Sequential(
-                nn.Linear(input_dim, 16),
+                # flatten the input
+                nn.Flatten(),
+                nn.Linear(self.image_shape[0] * self.image_shape[1] * self.image_shape[2], 784),
                 nn.ReLU(),
-                nn.Linear(16, self.n_hidden),
-                # nn.ReLU()
+                nn.Linear(784, 512),
+                nn.ReLU(),
+                nn.Linear(512, self.n_hidden),
+                nn.ReLU()
             )
             self.decoder = nn.Sequential(
-                nn.Linear(self.n_hidden, 16),
+                nn.Linear(self.n_hidden, 512),
                 nn.ReLU(),
-                nn.Linear(16, input_dim),
-                nn.ReLU()
+                nn.Linear(512, 784),
+                nn.ReLU(),
+                nn.Linear(784, self.image_shape[0] * self.image_shape[1] * self.image_shape[2]),
+                nn.Sigmoid(),
+                # reshape the output
+                nn.Unflatten(-1, self.image_shape)
             )
 
         self.tau = tau
@@ -125,7 +130,7 @@ class CobwebNN(nn.Module):
         return mean + eps * std
     
     def tree_wise_forward(self, x, y=None, hard=None):
-        x_mu = self.encoder(x)#.view(x.size(0), -1)
+        x_mu = self.encoder(x).view(x.size(0), -1)
 
         parent_root = self.leaves # shape: n_clusters, n_hidden
         parent_logvar = self.leaves_logvar
@@ -137,15 +142,15 @@ class CobwebNN(nn.Module):
         means.append(parent_root)
         logvars.append(parent_logvar)
 
-        hard = True
-        alpha = 1
+        hard = False
+        alpha = 0.0
 
         ###### TREE-WISE ######
-        # for i, layer in enumerate(self.layers):
-        #     parent_root, parent_logvar = layer(parent_root, parent_logvar)
+        for i, layer in enumerate(self.layers):
+            parent_root, parent_logvar = layer(parent_root, parent_logvar)
 
-        #     means.append(parent_root)
-        #     logvars.append(parent_logvar)
+            means.append(parent_root)
+            logvars.append(parent_logvar)
 
         # now I collect the means and logvars of entire tree
         means_cat = torch.cat(means, dim=0) # shape: 2**n_layers-1, n_hidden
@@ -167,7 +172,7 @@ class CobwebNN(nn.Module):
             sampled_x = self.sample(means_cat, logvars_cat)
         # weighted combination
         sampled_x = (dist_probs.unsqueeze(-1) * sampled_x).sum(dim=1) # shape: B, n_hidden
-        x_pred = self.decoder(sampled_x)
+        x_pred = self.decoder(sampled_x.view(-1, 512, 1, 1))
 
         return x, means, logvars, x_pred, p_x_nodes, p_node_x, x_mu, sampled_x
     
