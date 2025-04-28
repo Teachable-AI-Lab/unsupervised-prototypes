@@ -10,7 +10,6 @@ from torch.utils.data import DataLoader
 import PIL 
 from tqdm import tqdm
 import matplotlib.pyplot as plt
-import untils
 import utils
 from encoders import *
 from decoders import *
@@ -366,7 +365,7 @@ class DeepTaxonNet(nn.Module):
             alpha = self.noise_strength
         # print("alpha", alpha)
         logpcpzc = (log_pdf + torch.log(pi.unsqueeze(0))) # log p(c|z) = log p(c) + log p(z|c)
-        pcx, logpcx = untils.GumbelSoftmax(logpcpzc, # Gumbel softmax for exploration
+        pcx, logpcx = utils.GumbelSoftmax(logpcpzc, # Gumbel softmax for exploration
                                             tau=tau, 
                                             alpha=alpha,
                                             hard=False, # MUST be False

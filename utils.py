@@ -1386,3 +1386,203 @@ def compute_nmi(model, annotation, dataloader, device):
 
     nmi_score = normalized_mutual_info_score(all_labels, all_preds)
     return nmi_score
+
+def compute_soft_dendrogram_purity_test_only(model, test_dataloader, device, epsilon=1e-9):
+
+    model.eval()
+    model.to(device)
+
+    n_classes = 10
+    n_nodes = None
+
+    print("Processing test data to get probability distributions (pcx)...")
+    all_pcx = []
+    all_true_labels = []
+
+    with torch.no_grad():
+        for x_batch, y_batch in tqdm(test_dataloader, desc="Evaluating Test Set"):
+            if n_classes is None:
+                n_classes = int(y_batch.max().item()) + 1
+            else:
+                n_classes = max(n_classes, int(y_batch.max().item()) + 1)
+
+            x_batch = x_batch.to(device)
+            try:
+                outputs = model(x_batch)
+                if len(outputs) < 6:
+                     raise ValueError(f"Model output tuple has length {len(outputs)}, expected at least 6.")
+                pcx_batch = outputs[5] 
+            except Exception as e:
+                print(f"Error during model forward pass: {e}")
+                print("Check model definition and output structure.")
+                return None
+
+            if n_nodes is None:
+                n_nodes = pcx_batch.shape[1]
+            elif pcx_batch.shape[1] != n_nodes:
+                 print(f"Error: Inconsistent number of nodes in model output ({pcx_batch.shape[1]} vs {n_nodes}).")
+                 return None
+
+            all_pcx.append(pcx_batch.cpu())
+            all_true_labels.append(y_batch.cpu())
+
+    if n_nodes is None or n_classes is None:
+        print("Error: Could not determine number of nodes or classes from test data.")
+        return None
+
+    try:
+        all_pcx = torch.cat(all_pcx).float()
+        all_true_labels = torch.cat(all_true_labels)
+    except RuntimeError as e:
+         print(f"Error concatenating tensors (likely memory issue): {e}")
+         print("Try reducing batch size or running on a machine with more memory.")
+         return None
+
+    n_test = len(all_true_labels)
+    print(f"Processed {n_test} test samples. Found {n_classes} classes and {n_nodes} nodes.")
+
+    all_pcx = all_pcx.to(device)
+    all_true_labels = all_true_labels.to(device) 
+
+    print("Calculating node purities based on test set expected counts...")
+    test_node_purity = torch.zeros((n_classes, n_nodes), dtype=torch.float32, device=device)
+
+  
+    expected_total_count_per_node = torch.sum(all_pcx, dim=0) # Shape: (n_nodes,)
+
+    for k in range(n_classes):
+        indices_k = (all_true_labels == k).nonzero(as_tuple=True)[0]
+        if len(indices_k) > 0:
+            expected_class_count_per_node = torch.sum(all_pcx[indices_k, :], dim=0) # Shape: (n_nodes,)
+
+            denominator = expected_total_count_per_node + epsilon
+            test_node_purity[k, :] = expected_class_count_per_node / denominator
+
+    print("Node purities calculated.")
+
+    print("Calculating Soft Dendrogram Purity (iterating over pairs)...")
+    total_purity_sum = 0.0
+    total_pairs = 0
+
+    for k in tqdm(range(n_classes), desc="Processing Classes"):
+        indices_k = (all_true_labels == k).nonzero(as_tuple=True)[0]
+        N_k = len(indices_k)
+
+        if N_k < 2:
+            continue
+
+        num_pairs_k = N_k * (N_k - 1) / 2
+        total_pairs += num_pairs_k
+        class_purity_sum = 0.0
+
+        pcx_k = all_pcx[indices_k] # Shape: (Nk, n_nodes)
+        purities_k_vector = test_node_purity[k, :] # Shape: (n_nodes,)
+
+        for i_idx in range(N_k):
+            P_i = pcx_k[i_idx, :] 
+            for j_idx in range(i_idx + 1, N_k):
+                P_j = pcx_k[j_idx, :] 
+
+                joint_p = P_i * P_j # Shape: (n_nodes,)
+
+                joint_p_sum = joint_p.sum()
+                if joint_p_sum < epsilon:
+                    pair_purity = 0.0
+                else:
+                    weights = joint_p / joint_p_sum
+                    pair_purity = torch.dot(weights, purities_k_vector).item() 
+
+                class_purity_sum += pair_purity 
+
+        total_purity_sum += class_purity_sum
+
+    if total_pairs == 0:
+        print("Warning: No valid pairs found to calculate purity (test set might be too small or lack classes with >= 2 points).")
+        return 0.0
+
+    final_soft_dendrogram_purity = total_purity_sum / total_pairs
+    print("Calculation complete.")
+
+    return final_soft_dendrogram_purity
+
+
+# from collections import defaultdict
+
+# def compute_leaf_purity(model, dataloader, device='cuda'):
+#     model.eval()
+#     model.to(device)
+
+#     all_probs = []
+#     all_labels = []
+
+#     with torch.no_grad():
+#         for x_batch, y_batch in dataloader:
+#             x_batch = x_batch.to(device)
+#             y_batch = y_batch.to(device)
+
+#             output = model(x_batch)
+
+#             pcx = next(
+#                 t for t in output
+#                 if torch.is_tensor(t) and t.dim() == 2 and t.size(0) == x_batch.size(0)
+#             )
+
+#             all_probs.append(pcx.cpu())
+#             all_labels.append(y_batch.cpu())
+
+
+#     all_probs = torch.cat(all_probs, dim=0)     # (N, L)
+#     all_labels = torch.cat(all_labels, dim=0)   # (N,)
+#     num_leaves = all_probs.shape[1]
+
+#     leaf_class_weights = defaultdict(lambda: defaultdict(float))
+#     leaf_total_weights = defaultdict(float)
+
+#     for i in range(len(all_labels)):
+#         label = int(all_labels[i])
+#         for leaf_idx in range(num_leaves):
+#             weight = float(all_probs[i, leaf_idx])
+#             leaf_class_weights[leaf_idx][label] += weight
+#             leaf_total_weights[leaf_idx] += weight
+
+#     per_leaf_purities = {}
+#     weighted_sum = 0.0
+#     total_weight = sum(leaf_total_weights.values())
+
+#     for leaf_idx in range(num_leaves):
+#         if leaf_total_weights[leaf_idx] == 0:
+#             purity = 0.0
+#         else:
+#             max_class_weight = max(leaf_class_weights[leaf_idx].values(), default=0.0)
+#             purity = max_class_weight / leaf_total_weights[leaf_idx]
+
+#         per_leaf_purities[leaf_idx] = (purity, leaf_total_weights[leaf_idx])
+#         weighted_sum += purity * leaf_total_weights[leaf_idx]
+
+#     overall_leaf_purity = weighted_sum / total_weight if total_weight > 0 else 0.0
+#     return overall_leaf_purity, per_leaf_purities
+
+# from sklearn.metrics import normalized_mutual_info_score
+
+# def compute_nmi(model, annotation, dataloader, device):
+#     model.eval()
+#     all_preds = []
+#     all_labels = []
+
+#     with torch.no_grad():
+#         for images, labels in dataloader:
+#             images = images.to(device)
+#             _, _, _, _, _, pcx_batch, _, _ = model(images)
+#             pcx_batch = pcx_batch.detach().cpu()
+            
+#             preds = pcx_batch @ annotation.T  
+#             preds = preds.argmax(dim=1)    
+            
+#             all_preds.append(preds)
+#             all_labels.append(labels)
+
+#     all_preds = torch.cat(all_preds, dim=0).numpy()
+#     all_labels = torch.cat(all_labels, dim=0).numpy()
+
+#     nmi_score = normalized_mutual_info_score(all_labels, all_preds)
+#     return nmi_score

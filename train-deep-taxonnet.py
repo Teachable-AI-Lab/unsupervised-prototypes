@@ -190,8 +190,23 @@ for epoch in range(epochs):
         # model.kl1_weight = kl1_weight
         # model.recon_weight = recon_weight
 
+        ## psuedo code
+        # x_aug_1 = utils.data_augmentation(data)
+        # x_aug_2 = utils.data_augmentation(data)
+        # x_aug = torch.cat((x_aug_1, x_aug_2), dim=0) # shape (2*batch_size, 1, 28, 28)
+        # do SimCLR
 
-        loss, recon_loss, kl1, kl2, _, _, _, _ = model(data)   
+        loss, recon_loss, kl1, kl2, _, _, _, _ = model(data)  
+
+        # z: shape (2*batch_size, latent_dim)
+        # compute contrastive loss
+        # sim_score = torch.matmul(z_contrastive, z_contrastive.T) / 0.5
+        # compute NT-Xent loss
+
+
+         
+
+
 
 
         if args.wandb:

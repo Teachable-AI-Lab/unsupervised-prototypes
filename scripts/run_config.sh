@@ -11,4 +11,4 @@ conda init
 conda activate dl
 cd /nethome/zwang910/research/unsupervised-prototypes
 
-python train-deep-taxonnet.py --config scripts/configs/fmnist.json
+python train-deep-taxonnet.py --config scripts/configs/default.json
