@@ -96,7 +96,8 @@ class TaxonomicLayer(nn.Module):
         return mean_root, logvar_root, alpha.reshape(-1), sym_kl # shape: 2 * n_clusters, n_hidden
 
 class DeepTaxonNet(nn.Module):
-    def __init__(self, input_dim=3*32*32, 
+    def __init__(self, 
+                 input_dim=3*32*32, 
                  enc_hidden_dim=128,
                  dec_hidden_dim=128, # tuple for ResNet
                  latent_dim=32, 
@@ -187,6 +188,14 @@ class DeepTaxonNet(nn.Module):
             nn.Flatten(),
             nn.LayerNorm(self.enc_hidden_dim),
             nn.Linear(self.enc_hidden_dim, self.latent_dim),
+        )
+
+        self.contrastive_projection = nn.Sequential(
+            nn.Flatten(),
+            nn.Linear(self.enc_hidden_dim, 512),
+            nn.LayerNorm(512),
+            nn.ReLU(),
+            nn.Linear(512, 64),
         )
 
         # self.fc_mu.apply(lambda m: self.layer_init(m, 1e-3))
@@ -281,6 +290,7 @@ class DeepTaxonNet(nn.Module):
         if self.pretrained_encoder:
             with torch.no_grad():
                 x = self.pretrained(x)
+        z_contrastive = self.contrastive_projection(self.encoder(x))
         # print the range of x
         # x_noisy = utils.add_noise(x, 0, 'gaussian') 
         mu, logvar = self.encode(x) # shape: (batch_size, latent_dim)
@@ -505,7 +515,7 @@ class DeepTaxonNet(nn.Module):
             # print("dkl_penalty", dkl_penalty.sum().item())
             loss = loss + dkl_penalty.sum()
 
-        return loss, recon_loss, kl1, kl2, H, pcx, pi, dkl_list
+        return loss, recon_loss, kl1, kl2, H, pcx, pi, dkl_list, z_contrastive
     
     def softclip(self, tensor, min):
         """ Clips the tensor values at the minimum value min in a softway. Taken from Handful of Trials """

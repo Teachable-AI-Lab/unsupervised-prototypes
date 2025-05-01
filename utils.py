@@ -6,7 +6,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torchvision import transforms, datasets
-from torch.utils.data import DataLoader, IterableDataset
+from torch.utils.data import DataLoader, IterableDataset, Dataset
 from tqdm import tqdm
 from sklearn.manifold import TSNE
 from sklearn.decomposition import PCA
@@ -22,6 +22,52 @@ import torchvision.models as models
 from collections import OrderedDict
 
 
+
+# def augment(x, transformations):
+#     '''
+#     x: tensor of shape (Batch, 3, 32, 32)
+#     transformations: list of transformations
+#     '''
+#     x = x.clone()
+#     for i in range(x.shape[0]):
+#         x[i] = transformations(x[i])
+#     return x
+
+def contrastive_loss(similarity_matrix, temperature=0.5):
+    """
+    Compute the contrastive loss given the similarity matrix.
+    """
+    # Get the number of samples
+    batch_size_2n = similarity_matrix.shape[0]
+    n = batch_size_2n // 2
+    device = similarity_matrix.device
+
+    # Scale similarities by temperature
+    logits = similarity_matrix / temperature
+
+    # Create labels: positive pair is (i, i+N) and (i+N, i)
+    # For row i (0 <= i < N), target is i+N
+    # For row i+N (0 <= i < N), target is i
+    labels = torch.cat([torch.arange(n) + n, torch.arange(n)], dim=0)
+    labels = labels.to(device) # Ensure labels are on the same device as logits
+
+    # --- Masking out self-similarity ---
+    # Create a mask to prevent examples from being compared with themselves.
+    # This is crucial because exp(sim(i,i)/temp) should not be in the denominator.
+    # F.cross_entropy implicitly handles the softmax and log calculation.
+    # By setting the diagonal (self-similarity) logits to a very low number (-inf),
+    # we ensure they don't contribute to the denominator sum in the softmax.
+    mask = torch.eye(batch_size_2n, dtype=torch.bool).to(device)
+    logits = logits.masked_fill(mask, -float('inf')) # Mask diagonal
+
+    # --- Compute Cross-Entropy Loss ---
+    # F.cross_entropy computes: -log(softmax(logits))[label]
+    # which is equivalent to the NT-Xent loss formula when averaged over the batch.
+    # Logits shape: (batch_size_2n, batch_size_2n) -> (Current Sample, All Other Samples)
+    # Labels shape: (batch_size_2n) -> Index of the positive sample for each current sample
+    loss = F.cross_entropy(logits, labels, reduction='mean')
+
+    return loss
 
 def add_noise(x, noise_level=0.1, noise_type='gaussian'):
     '''
@@ -189,7 +235,7 @@ def label_annotation(model, support_loader, n_classes, device):
     with torch.no_grad():
         for i, (image, label) in enumerate(support_loader):
             image = image.to(device)
-            _, _, _, _, _, pcx_batch, _, _ = model(image)
+            _, _, _, _, _, pcx_batch, _, _, _ = model(image)
             pcx.append(pcx_batch)
             labels.append(label)
 
@@ -234,7 +280,7 @@ def basic_node_evaluation(model, annotation, query_loader, device):
     with torch.no_grad():
         for i, (image, label) in enumerate(query_loader):
             image = image.to(device)
-            _, _, _, _, _, pcx_batch, _, _ = model(image)
+            _, _, _, _, _, pcx_batch, _, _, _ = model(image)
             pcx.append(pcx_batch.detach().cpu())
             labels.append(label)
 
@@ -754,15 +800,15 @@ def get_data_loader(dataset, batch_size, normalize,
     if dataset == 'omniglot':
         train_set = dataset_class(root=data_dir, download=download, transform=transform)
         test_set = dataset_class(root=data_dir, background=False, download=download, transform=transform)
-        test_classes = sorted(list(set(label for _, label in test_set)))
-        test_set = EpisodeDataset(
-            dataset=test_set,
-            class_list=test_classes,
-            n_way=N_WAY_TEST,
-            k_shot=K_SHOT_TEST,
-            n_query=N_QUERY_TEST,
-            n_episodes_per_epoch=N_TEST_EPISODES # Generate enough episodes for evaluation
-        )
+        # test_classes = sorted(list(set(label for _, label in test_set)))
+        # test_set = EpisodeDataset(
+        #     dataset=test_set,
+        #     class_list=test_classes,
+        #     n_way=N_WAY_TEST,
+        #     k_shot=K_SHOT_TEST,
+        #     n_query=N_QUERY_TEST,
+        #     n_episodes_per_epoch=N_TEST_EPISODES # Generate enough episodes for evaluation
+        # )
         # radnomly split the dataset into 2 parts: 80% for training and 20% for testing
 
     elif dataset == 'svhn':
@@ -771,9 +817,15 @@ def get_data_loader(dataset, batch_size, normalize,
         test_set = dataset_class(root=data_dir, split='test', download=download, transform=transform)
         # radnomly split the dataset into 2 parts: 80% for training and 20% for testing
 
+    elif dataset == 'cifar-10' or dataset == 'cifar-100':
+        train_set = dataset_class(root=data_dir, train=True, download=download, transform=transform)
+        train_set = SimCLRDatasetWrapper(train_set, crop_size=32)
+        test_set = dataset_class(root=data_dir, train=False, download=download, transform=transform)
+
     elif dataset == 'stl-10':
         # STL-10 has train and test splits
         train_set = dataset_class(root=data_dir, split='unlabeled', download=download, transform=transform)
+        train_set = SimCLRDatasetWrapper(train_set, crop_size=96)
         test_set = dataset_class(root=data_dir, split='test', download=download, transform=transform)
         # radnomly split the dataset into 2 parts: 80% for training and 20% for testing
 
@@ -791,19 +843,81 @@ def get_data_loader(dataset, batch_size, normalize,
         indices = np.random.choice(len(train_set), int(len(train_set) * train_subset), replace=False)
         train_set = torch.utils.data.Subset(train_set, indices)
         print(f"Using {len(train_set)} samples for training.")
-    train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True,
-                              num_workers=4, pin_memory=True)
-    if dataset == 'omniglot':
-        test_loader = DataLoader(
-            dataset=test_set,
-            batch_size=None, # EpisodeDataset yields full episodes as batches
-            num_workers=0 # Often safer for IterableDatasets, adjust if needed
+
+    if dataset == 'cifar-10' or dataset == 'cifar-100' or dataset == 'stl-10':
+        train_loader = DataLoader(
+            train_set,
+            batch_size=batch_size, # This N determines the size of view1_batch and view2_batch
+            shuffle=True,
+            num_workers=8,
+            pin_memory=True, # Recommended for faster GPU transfer
+            drop_last=True   # Often used in contrastive learning
         )
     else:
-        test_loader = DataLoader(test_set, batch_size=batch_size * 2, shuffle=False,
-                             num_workers=4, pin_memory=True)
+        train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True,
+                              num_workers=8, pin_memory=True)
+    # if dataset == 'omniglot':
+    #     test_loader = DataLoader(
+    #         dataset=test_set,
+    #         batch_size=None, # EpisodeDataset yields full episodes as batches
+    #         num_workers=0 # Often safer for IterableDatasets, adjust if needed
+    #     )
+    # else:
+    test_loader = DataLoader(test_set, batch_size=batch_size * 2, shuffle=False,
+                             num_workers=8, pin_memory=True)
 
     return train_loader, test_loader, train_set, test_set
+
+class SimCLRDatasetWrapper(Dataset):
+    """
+    Wraps a dataset to produce two augmented views for SimCLR.
+    """
+    def __init__(self, base_dataset, crop_size=32):
+        """
+        Args:
+            base_dataset: The underlying dataset (e.g., CIFAR10 instance).
+            transform: The SimCLR augmentation transform to apply twice.
+        """
+        self.base_dataset = base_dataset
+        self.crop_size = crop_size
+        self.transform = self.get_augmentation()
+
+    def __len__(self):
+        return len(self.base_dataset)
+    
+    def get_augmentation(self):
+        aug = transforms.Compose([
+            transforms.RandomResizedCrop(size=[self.crop_size, self.crop_size], scale=(0.2, 1.0), ratio=(0.75, 1.3333)),
+            transforms.RandomHorizontalFlip(p=0.5),
+            transforms.RandomApply([
+                transforms.ColorJitter(brightness=(0.6, 1.4), contrast=(0.6, 1.4), saturation=(0.6, 1.4), hue=(-0.1, 0.1))
+            ], p=0.8),
+            transforms.RandomGrayscale(p=0.2),
+        ])
+        return aug
+
+    def __getitem__(self, idx):
+        # Get the raw image (and possibly label, though often ignored in SimCLR pretraining)
+        # Adjust based on what base_dataset returns
+        item = self.base_dataset[idx]
+        if isinstance(item, tuple):
+            # Common case: (image, label)
+            image = item[0]
+            # label = item[1] # We might not need the label for SimCLR pre-training itself
+        else:
+            # Case: dataset returns only images
+            image = item
+
+        # Apply the same augmentation pipeline twice to the *original* image
+        # The randomness within the transforms ensures different views
+        view1 = self.transform(image)
+        view2 = self.transform(image)
+
+        # Return the two views. The DataLoader will handle batching.
+        # If you needed labels later (e.g., for linear evaluation), you could return:
+        # return view1, view2, label
+        return view1, view2
+
 
 def load_config_from_json(config_path):
     """Loads configuration parameters from a JSON file."""
@@ -830,263 +944,6 @@ def load_config_from_json(config_path):
 
     return config_args
 
-######## Episodic Dataset ########
-class EpisodeDataset(IterableDataset):
-    """
-    Generates batches for N-way K-shot classification tasks using PyTorch IterableDataset.
-
-    Each batch corresponds to a single few-shot task (episode).
-    It samples N classes, then K support examples and Q query examples for each class.
-
-    Designed to work with a standard PyTorch Dataset that returns (image, label) tuples.
-    """
-    def __init__(self, dataset, class_list, n_way, k_shot, n_query, n_episodes_per_epoch):
-        """
-        Initializes the EpisodeDataset.
-
-        Args:
-            dataset (torch.utils.data.Dataset): The underlying dataset.
-                                                 Expected: dataset[i] returns (image_tensor, class_label).
-                                                 Optimization: Can optionally have `dataset.class_indices`
-                                                 (dict: class -> [indices]) and `dataset.get_label(index)`
-                                                 for faster initialization.
-            class_list (iterable): A list or set of unique class labels to sample episodes from
-                                   (e.g., training classes or test classes for this specific sampler).
-            n_way (int): Number of classes per episode (N).
-            k_shot (int): Number of support examples per class (K).
-            n_query (int): Number of query examples per class (Q).
-            n_episodes_per_epoch (int): How many episodes (batches) to generate per epoch.
-        """
-        super().__init__()
-
-        # --- 1. Input Validation ---
-        if not isinstance(dataset, torch.utils.data.Dataset):
-            raise TypeError("`dataset` must be a PyTorch Dataset object.")
-        if not hasattr(class_list, '__iter__'):
-            raise TypeError("`class_list` must be an iterable (list, set, etc.).")
-        if not (isinstance(n_way, int) and n_way > 0):
-            raise ValueError("`n_way` must be a positive integer.")
-        if not (isinstance(k_shot, int) and k_shot > 0):
-            raise ValueError("`k_shot` must be a positive integer.")
-        if not (isinstance(n_query, int) and n_query >= 0): # Query set can be empty
-            raise ValueError("`n_query` must be a non-negative integer.")
-        if not (isinstance(n_episodes_per_epoch, int) and n_episodes_per_epoch > 0):
-            raise ValueError("`n_episodes_per_epoch` must be a positive integer.")
-
-        self.dataset = dataset
-        # Store unique, sorted list of classes relevant for this sampler
-        self.available_classes = sorted(list(set(class_list)))
-        self.n_way = n_way
-        self.k_shot = k_shot
-        self.n_query = n_query
-        self.n_episodes_per_epoch = n_episodes_per_epoch
-        self.samples_per_class_needed = self.k_shot + self.n_query
-
-        if self.samples_per_class_needed <= 0:
-             raise ValueError("k_shot + n_query must be > 0")
-
-        # --- 2. Indexing: Map classes to their sample indices ---
-        start_time = time.time()
-        print("Initializing EpisodeDataset: Indexing dataset by class...")
-        # This dictionary will store: {class_label: [list of indices in self.dataset]}
-        self.class_to_indices = defaultdict(list)
-        self._build_class_indices() # Helper method for clarity
-        indexing_time = time.time() - start_time
-        print(f"-> Indexing complete in {indexing_time:.2f} seconds.")
-        print(f"-> Found {len(self.class_to_indices)} classes with enough samples.")
-
-        # --- 3. Final Validation ---
-        # Update available_classes based on indexing results
-        self.available_classes = sorted(list(self.class_to_indices.keys()))
-
-        if len(self.available_classes) < self.n_way:
-            raise ValueError(
-                f"Not enough classes with sufficient samples found. "
-                f"Need {self.n_way} classes for N-way sampling, but only found "
-                f"{len(self.available_classes)} classes with at least "
-                f"{self.samples_per_class_needed} samples in the provided class_list."
-            )
-
-        print(f"EpisodeDataset ready: Using {len(self.available_classes)} classes for {self.n_way}-way {self.k_shot}-shot tasks "
-              f"({self.n_query} query samples/class).")
-        print(f"Generating {self.n_episodes_per_epoch} episodes per epoch.")
-
-    def _build_class_indices(self):
-        """
-        Populates self.class_to_indices by mapping class labels to their
-        corresponding indices in the underlying dataset.
-        Filters classes based on the required number of samples (k_shot + n_query).
-        """
-        valid_class_count = 0
-
-        # OPTIMIZATION: Check if the dataset object already provides pre-computed indices
-        if hasattr(self.dataset, 'class_indices') and isinstance(self.dataset.class_indices, dict):
-            print("--> Attempting to use precomputed `class_indices` from dataset.")
-            found_precomputed = True
-            # Iterate through the classes relevant for *this* sampler instance
-            for cls_label in self.available_classes:
-                if cls_label in self.dataset.class_indices:
-                    indices = self.dataset.class_indices[cls_label]
-                    # Check if this class has enough samples
-                    if len(indices) >= self.samples_per_class_needed:
-                        self.class_to_indices[cls_label] = indices
-                        valid_class_count += 1
-                    else:
-                        warnings.warn(f"Class '{cls_label}' found in precomputed indices but has only "
-                                      f"{len(indices)} samples (need {self.samples_per_class_needed}). Skipping.")
-                else:
-                    warnings.warn(f"Class '{cls_label}' from class_list not found in dataset.class_indices.")
-            if valid_class_count > 0:
-                 print(f"--> Successfully used precomputed indices for {valid_class_count} classes.")
-                 return # Successfully used precomputed indices
-
-            else:
-                 print("--> Precomputed indices found but none were suitable/matched class_list. Falling back to manual indexing.")
-
-
-        # FALLBACK: Manually iterate through the dataset if precomputed indices aren't suitable/available
-        print("--> Manually indexing dataset by class (can be slow for large datasets)...")
-        has_get_label = hasattr(self.dataset, 'get_label') and callable(self.dataset.get_label)
-        if not has_get_label:
-            print("    (Dataset lacks `get_label` method, will load items via __getitem__ for indexing)")
-
-        temp_indices = defaultdict(list)
-        dataset_len = len(self.dataset)
-        class_list_set = set(self.available_classes) # Use set for faster lookups
-
-        for i in range(dataset_len):
-            try:
-                # Get label: Use get_label if available (faster), otherwise load item
-                if has_get_label:
-                    label = self.dataset.get_label(i)
-                else:
-                    _, label = self.dataset[i] # Slower: loads image data too
-
-                # Ensure label is a hashable type (e.g., int, string)
-                if isinstance(label, torch.Tensor): label = label.item()
-                elif isinstance(label, np.ndarray): label = label.item()
-
-                # Store index if the label is in the list for this sampler
-                if label in class_list_set:
-                    temp_indices[label].append(i)
-
-                # Optional: Progress indicator for very large datasets
-                # if (i + 1) % 20000 == 0: print(f"    Indexed {i+1}/{dataset_len}...")
-
-            except Exception as e:
-                warnings.warn(f"Could not process index {i} during manual indexing. Error: {e}")
-                continue
-
-        # Filter the manually collected indices based on sample count
-        for cls_label, indices in temp_indices.items():
-            if len(indices) >= self.samples_per_class_needed:
-                self.class_to_indices[cls_label] = indices
-                valid_class_count += 1
-            else:
-                 warnings.warn(f"Class '{cls_label}' found via manual indexing but has only "
-                               f"{len(indices)} samples (need {self.samples_per_class_needed}). Skipping.")
-        print(f"--> Manual indexing complete. Found {valid_class_count} valid classes.")
-
-
-    def __iter__(self):
-        """
-        Yields episode batches for one epoch.
-        """
-        episode_count = 0
-        while episode_count < self.n_episodes_per_epoch:
-
-            # --- 1. Sample N distinct classes for the episode ---
-            try:
-                # Randomly select N classes from the list of classes that have enough samples
-                episode_class_labels = random.sample(self.available_classes, self.n_way)
-            except ValueError:
-                # This should only happen if self.available_classes < self.n_way,
-                # which is checked in __init__, but included as a safeguard.
-                warnings.warn(f"Could not sample {self.n_way} classes from {len(self.available_classes)} available classes. Stopping iteration.")
-                break # Stop the generator
-
-            support_indices = []
-            query_indices = []
-            support_local_labels_list = []
-            query_local_labels_list = []
-
-            # --- 2. Sample K support and Q query examples for each chosen class ---
-            sampling_successful = True
-            for local_label_idx, global_class_label in enumerate(episode_class_labels):
-                all_indices_for_class = self.class_to_indices[global_class_label]
-                num_available = len(all_indices_for_class)
-
-                # Double-check sample count (should be guaranteed by __init__)
-                if num_available < self.samples_per_class_needed:
-                     warnings.warn(f"Class '{global_class_label}' unexpectedly found with insufficient samples ({num_available}) during iteration. Skipping episode.")
-                     sampling_successful = False
-                     break # Skip this episode
-
-                # Efficiently sample K+Q indices without replacement
-                # torch.randperm is faster than random.sample for integer ranges
-                shuffled_local_indices = torch.randperm(num_available)
-                selected_local_indices = shuffled_local_indices[:self.samples_per_class_needed]
-                # Map these back to the actual dataset indices
-                selected_global_indices = [all_indices_for_class[i.item()] for i in selected_local_indices]
-
-                # Split into support and query sets
-                class_support_indices = selected_global_indices[:self.k_shot]
-                class_query_indices = selected_global_indices[self.k_shot:]
-
-                support_indices.extend(class_support_indices)
-                query_indices.extend(class_query_indices)
-
-                # Assign the *local* episode label (0 to N-1) corresponding to this class
-                support_local_labels_list.extend([local_label_idx] * self.k_shot)
-                query_local_labels_list.extend([local_label_idx] * self.n_query)
-
-            # If sampling failed for any class in this episode, skip to the next iteration
-            if not sampling_successful:
-                continue
-
-            # --- 3. Fetch the actual data (images) using the sampled indices ---
-            try:
-                # This step involves accessing self.dataset[idx], which might be slow if loading from disk.
-                support_items = [self.dataset[idx] for idx in support_indices] # List of (img, label) tuples
-                query_items = [self.dataset[idx] for idx in query_indices]     # List of (img, label) tuples
-            except Exception as e:
-                warnings.warn(f"Error fetching data for episode (indices: S={support_indices}, Q={query_indices}). Error: {e}. Skipping episode.")
-                continue # Skip this episode
-
-            # --- 4. Format the batch: Stack images and create label tensors ---
-            try:
-                # Assuming the first element of the item tuple is the image tensor
-                support_images = torch.stack([item[0] for item in support_items]) # Shape: (N*K, C, H, W)
-                query_images = torch.stack([item[0] for item in query_items])     # Shape: (N*Q, C, H, W)
-
-                # Convert the local label lists (0 to N-1) to tensors
-                support_local_labels = torch.tensor(support_local_labels_list, dtype=torch.long) # Shape: (N*K)
-                query_local_labels = torch.tensor(query_local_labels_list, dtype=torch.long)     # Shape: (N*Q)
-
-            except Exception as e:
-                 warnings.warn(f"Error stacking tensors or creating label tensors. Error: {e}. Skipping episode.")
-                 # You might want to inspect item[0].shape and type here if errors occur
-                 continue # Skip this episode
-
-            # --- 5. Yield the complete episode batch ---
-            yield {
-                'support_images': support_images,       # Images for the support set
-                'support_labels': support_local_labels, # Corresponding local labels (0 to N-1)
-                'query_images': query_images,           # Images for the query set
-                'query_labels': query_local_labels,     # Corresponding local labels (0 to N-1)
-                'episode_classes': episode_class_labels # Original class labels used in this episode (optional)
-            }
-            episode_count += 1 # Increment count only after successfully yielding an episode
-
-
-    def __len__(self):
-        """
-        Returns the number of episodes intended to be generated per epoch.
-        Note: For IterableDataset, this is often informational. The iteration stops
-              based on the logic within __iter__.
-        """
-        return self.n_episodes_per_epoch
-    
 
 def get_pretrained(model_name):
     checkpoint_path = '/nethome/zwang910/file_storage/nips-2025/deep-taxon/pretrained/'
@@ -1506,83 +1363,3 @@ def compute_soft_dendrogram_purity_test_only(model, test_dataloader, device, eps
     return final_soft_dendrogram_purity
 
 
-# from collections import defaultdict
-
-# def compute_leaf_purity(model, dataloader, device='cuda'):
-#     model.eval()
-#     model.to(device)
-
-#     all_probs = []
-#     all_labels = []
-
-#     with torch.no_grad():
-#         for x_batch, y_batch in dataloader:
-#             x_batch = x_batch.to(device)
-#             y_batch = y_batch.to(device)
-
-#             output = model(x_batch)
-
-#             pcx = next(
-#                 t for t in output
-#                 if torch.is_tensor(t) and t.dim() == 2 and t.size(0) == x_batch.size(0)
-#             )
-
-#             all_probs.append(pcx.cpu())
-#             all_labels.append(y_batch.cpu())
-
-
-#     all_probs = torch.cat(all_probs, dim=0)     # (N, L)
-#     all_labels = torch.cat(all_labels, dim=0)   # (N,)
-#     num_leaves = all_probs.shape[1]
-
-#     leaf_class_weights = defaultdict(lambda: defaultdict(float))
-#     leaf_total_weights = defaultdict(float)
-
-#     for i in range(len(all_labels)):
-#         label = int(all_labels[i])
-#         for leaf_idx in range(num_leaves):
-#             weight = float(all_probs[i, leaf_idx])
-#             leaf_class_weights[leaf_idx][label] += weight
-#             leaf_total_weights[leaf_idx] += weight
-
-#     per_leaf_purities = {}
-#     weighted_sum = 0.0
-#     total_weight = sum(leaf_total_weights.values())
-
-#     for leaf_idx in range(num_leaves):
-#         if leaf_total_weights[leaf_idx] == 0:
-#             purity = 0.0
-#         else:
-#             max_class_weight = max(leaf_class_weights[leaf_idx].values(), default=0.0)
-#             purity = max_class_weight / leaf_total_weights[leaf_idx]
-
-#         per_leaf_purities[leaf_idx] = (purity, leaf_total_weights[leaf_idx])
-#         weighted_sum += purity * leaf_total_weights[leaf_idx]
-
-#     overall_leaf_purity = weighted_sum / total_weight if total_weight > 0 else 0.0
-#     return overall_leaf_purity, per_leaf_purities
-
-# from sklearn.metrics import normalized_mutual_info_score
-
-# def compute_nmi(model, annotation, dataloader, device):
-#     model.eval()
-#     all_preds = []
-#     all_labels = []
-
-#     with torch.no_grad():
-#         for images, labels in dataloader:
-#             images = images.to(device)
-#             _, _, _, _, _, pcx_batch, _, _ = model(images)
-#             pcx_batch = pcx_batch.detach().cpu()
-            
-#             preds = pcx_batch @ annotation.T  
-#             preds = preds.argmax(dim=1)    
-            
-#             all_preds.append(preds)
-#             all_labels.append(labels)
-
-#     all_preds = torch.cat(all_preds, dim=0).numpy()
-#     all_labels = torch.cat(all_labels, dim=0).numpy()
-
-#     nmi_score = normalized_mutual_info_score(all_labels, all_preds)
-#     return nmi_score
