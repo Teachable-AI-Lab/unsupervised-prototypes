@@ -154,7 +154,7 @@ if args.pretraining_epochs > 0:
 optimizer = optim.AdamW(model.parameters(), lr=args.lr)
 scheduler = None
 if args.lr_scheduler == 'step':
-    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=100, gamma=0.5)
+    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=100, gamma=0.1)
 elif args.lr_scheduler == 'linear-up':
     scheduler = optim.lr_scheduler.LinearLR(optimizer, start_factor=1.0, end_factor=0.1, total_iters=args.epochs)
 elif args.lr_scheduler == 'linear-down':
@@ -169,13 +169,20 @@ epochs = args.epochs
 for epoch in range(epochs):
     print(f'Epoch {epoch}')
     model.train()
-    for j, (data, target) in enumerate(train_loader):
+    for j, batch in enumerate(train_loader):
         # model.train()
         optimizer.zero_grad()
 
-        data = data.to(device)
+        if args.use_contrastive_loss:
+            x_aug_1, x_aug_2 = batch
+            x = torch.cat((x_aug_1, x_aug_2), dim=0) # batch_size * 2, image shape
+            x = x.to(device)
 
-        # beta = utils.linear_annealing(steps, anneal_epochs=40000)     
+        else:
+            x, _ = batch
+            x = x.to(device)
+
+        # beta = utils.linear_annealing(steps, anneal_epochs=60000)     
         # model.kl1_weight = beta
 
         # if epoch < 10:
@@ -195,18 +202,35 @@ for epoch in range(epochs):
         # x_aug_2 = utils.data_augmentation(data)
         # x_aug = torch.cat((x_aug_1, x_aug_2), dim=0) # shape (2*batch_size, 1, 28, 28)
         # do SimCLR
+        
+        # data augmentation
+        # x_aug_1 = utils.augment(data, utils.cifar_aug)
+        # x_aug_2 = utils.augment(data, utils.cifar_aug)
 
-        loss, recon_loss, kl1, kl2, _, _, _, _ = model(data)  
+        loss, recon_loss, kl1, kl2, _, pcx, _, _, z = model(x)  
 
         # z: shape (2*batch_size, latent_dim)
         # compute contrastive loss
         # sim_score = torch.matmul(z_contrastive, z_contrastive.T) / 0.5
         # compute NT-Xent loss
 
+        # pcx_sim_loss, z_sim_loss = 0, 0
 
-         
+        # do cosine similarity
+        if args.use_contrastive_loss:
+            z = F.normalize(z, p=2, dim=1)
+            z_similarity = torch.matmul(z, z.T) # batch_size * 2, batch_size * 2
+            z_sim_loss = utils.contrastive_loss(z_similarity, args.embed_temp) * args.contrastive_loss_weight
 
+            # do cosine similarity
+            pcx = F.normalize(pcx, p=2, dim=1)
+            pcx_similarity = torch.matmul(pcx, pcx.T) # batch_size * 2, batch_size * 2
+            pcx_sim_loss = utils.contrastive_loss(pcx_similarity, args.pcx_temp) * args.contrastive_loss_weight
+            
+            loss = loss + z_sim_loss + pcx_sim_loss
 
+        # or do Jensen-Shannon divergence
+        
 
 
         if args.wandb:
@@ -214,8 +238,10 @@ for epoch in range(epochs):
                         'recon_loss': recon_loss.item(),
                         'kl1': -kl1.item(),
                         'kl2': -kl2.item(),
-                        # 'beta': model.logvar_x.item(),
-                       'steps': steps})
+                        'z_sim_loss': z_sim_loss.item() if args.use_contrastive_loss else 0,
+                        'pcx_sim_loss': pcx_sim_loss.item() if args.use_contrastive_loss else 0,
+                        'learning_rate': optimizer.param_groups[0]['lr'],
+                        'steps': steps})
 
         loss.backward()
         optimizer.step()
@@ -268,6 +294,7 @@ for epoch in range(epochs):
                 os.makedirs(model_save_path)
             torch.save(model.state_dict(), f'{model_save_path}/deep_taxon_{epoch}.pt')
             print(f'Model saved at {model_save_path}/deep_taxon_{epoch}.pt')
+
         # evaluate model via linear probing
         # acc = utils.linear_probing(model, args.n_classes, train_loader, test_loader, lr=args.linear_probing_lr, epochs=args.linear_probing_epochs, device=device)
         # if args.wandb:
@@ -326,11 +353,11 @@ for epoch in range(epochs):
             if args.wandb:
                 wandb.log({'Accuracy': acc, 'epoch': epoch})
 
-            if args.dataset == 'cifar-10': # try transfer learning
-                cifar100_train_loader, cifar100_test_loader, _, _ = utils.get_data_loader('cifar-100', 256, False)
-                annotation = utils.label_annotation(model, cifar100_train_loader, 100, device)
-                acc = utils.basic_node_evaluation(model, annotation, cifar100_test_loader, device)
-                if args.wandb:
-                    wandb.log({'Transfer to CIFAR-100 accuracy': acc, 'epoch': epoch})
+            # if args.dataset == 'cifar-10': # try transfer learning
+            #     cifar100_train_loader, cifar100_test_loader, _, _ = utils.get_data_loader('cifar-100', 256, False)
+            #     annotation = utils.label_annotation(model, cifar100_train_loader, 100, device)
+            #     acc = utils.basic_node_evaluation(model, annotation, cifar100_test_loader, device)
+            #     if args.wandb:
+            #         wandb.log({'Transfer to CIFAR-100 accuracy': acc, 'epoch': epoch})
 
         
