@@ -1,0 +1,524 @@
+no change     /nethome/zwang910/miniconda3/condabin/conda
+no change     /nethome/zwang910/miniconda3/bin/conda
+no change     /nethome/zwang910/miniconda3/bin/conda-env
+no change     /nethome/zwang910/miniconda3/bin/activate
+no change     /nethome/zwang910/miniconda3/bin/deactivate
+no change     /nethome/zwang910/miniconda3/etc/profile.d/conda.sh
+no change     /nethome/zwang910/miniconda3/etc/fish/conf.d/conda.fish
+no change     /nethome/zwang910/miniconda3/shell/condabin/Conda.psm1
+no change     /nethome/zwang910/miniconda3/shell/condabin/conda-hook.ps1
+no change     /nethome/zwang910/miniconda3/lib/python3.12/site-packages/xontrib/conda.xsh
+no change     /nethome/zwang910/miniconda3/etc/profile.d/conda.csh
+no change     /nethome/zwang910/.bashrc
+No action taken.
+wandb: Using wandb-core as the SDK backend.  Please refer to https://wandb.me/wandb-core for more information.
+wandb: Currently logged in as: ndrsn0208 (ndrsn0208-georgia-institute-of-technology) to https://api.wandb.ai. Use `wandb login --relogin` to force relogin
+wandb: Tracking run with wandb version 0.19.8
+wandb: Run data is saved locally in /nethome/zwang910/research/unsupervised-prototypes/wandb/run-20250501_012021-el8den8b
+wandb: Run `wandb offline` to turn off syncing.
+wandb: Syncing run dtn-10-t-1.0-cosine-cifar100
+wandb: ⭐️ View project at https://wandb.ai/ndrsn0208-georgia-institute-of-technology/deep-taxon
+wandb: 🚀 View run at https://wandb.ai/ndrsn0208-georgia-institute-of-technology/deep-taxon/runs/el8den8b
+Configuration loaded successfully:
+------------------------------
+  batch_size: 128 (Type: int)
+  contrastive_loss_weight: 100.0 (Type: float)
+  convex_weight_lambda: 0.02 (Type: float)
+  dataset: cifar-100 (Type: str)
+  dec_hidden_dim: (512, 1, 1) (Type: tuple)
+  decoder_name: resnet18 (Type: str)
+  device_id: 0 (Type: int)
+  dkl_margin: 1.2 (Type: float)
+  dkl_weight_lambda: 0.02 (Type: float)
+  embed_temp: 0.5 (Type: float)
+  enc_hidden_dim: 512 (Type: int)
+  encoder_name: resnet18 (Type: str)
+  epochs: 501 (Type: int)
+  input_dim: 3072 (Type: int)
+  kl1_weight: 1.0 (Type: float)
+  latent_dim: 64 (Type: int)
+  linear_probing_epochs: 50 (Type: int)
+  linear_probing_lr: 0.01 (Type: float)
+  logvar_init_range: -1 (Type: int)
+  lr: 0.001 (Type: float)
+  lr_scheduler: cosine (Type: str)
+  model_save_interval: 20 (Type: int)
+  model_save_path: dtn-10-t-1.0-cosine-cifar100 (Type: str)
+  n_classes: 100 (Type: int)
+  n_layers: 10 (Type: int)
+  normalize: False (Type: bool)
+  pcx_temp: 1.0 (Type: float)
+  pretrained_encoder: False (Type: bool)
+  pretraining_epochs: 0 (Type: int)
+  pretraining_lr: 0.001 (Type: float)
+  recon_weight: 1.0 (Type: float)
+  seed: 0 (Type: int)
+  use_contrastive_loss: True (Type: bool)
+  vade_baseline: False (Type: bool)
+  wandb: True (Type: bool)
+  wandb_project: deep-taxon (Type: str)
+  wandb_run_name: dtn-10-t-1.0-cosine-cifar100 (Type: str)
+------------------------------
+Loading data...
+Start training...
+Epoch 0
+Model saved at /nethome/zwang910/file_storage/nips-2025/deep-taxon/project-checkin/dtn-10-t-1.0-cosine-cifar100//deep_taxon_0.pt
+Epoch 1
+Epoch 2
+Epoch 3
+Epoch 4
+Epoch 5
+Epoch 6
+Epoch 7
+Epoch 8
+Epoch 9
+Epoch 10
+Epoch 11
+Epoch 12
+Epoch 13
+Epoch 14
+Epoch 15
+Epoch 16
+Epoch 17
+Epoch 18
+Epoch 19
+Epoch 20
+Model saved at /nethome/zwang910/file_storage/nips-2025/deep-taxon/project-checkin/dtn-10-t-1.0-cosine-cifar100//deep_taxon_20.pt
+Epoch 21
+Epoch 22
+Epoch 23
+Epoch 24
+Epoch 25
+Epoch 26
+Epoch 27
+Epoch 28
+Epoch 29
+Epoch 30
+Epoch 31
+Epoch 32
+Epoch 33
+Epoch 34
+Epoch 35
+Epoch 36
+Epoch 37
+Epoch 38
+Epoch 39
+Epoch 40
+Model saved at /nethome/zwang910/file_storage/nips-2025/deep-taxon/project-checkin/dtn-10-t-1.0-cosine-cifar100//deep_taxon_40.pt
+Epoch 41
+Epoch 42
+Epoch 43
+Epoch 44
+Epoch 45
+Epoch 46
+Epoch 47
+Epoch 48
+Epoch 49
+Epoch 50
+Epoch 51
+Epoch 52
+Epoch 53
+Epoch 54
+Epoch 55
+Epoch 56
+Epoch 57
+Epoch 58
+Epoch 59
+Epoch 60
+Model saved at /nethome/zwang910/file_storage/nips-2025/deep-taxon/project-checkin/dtn-10-t-1.0-cosine-cifar100//deep_taxon_60.pt
+Epoch 61
+Epoch 62
+Epoch 63
+Epoch 64
+Epoch 65
+Epoch 66
+Epoch 67
+Epoch 68
+Epoch 69
+Epoch 70
+Epoch 71
+Epoch 72
+Epoch 73
+Epoch 74
+Epoch 75
+Epoch 76
+Epoch 77
+Epoch 78
+Epoch 79
+Epoch 80
+Model saved at /nethome/zwang910/file_storage/nips-2025/deep-taxon/project-checkin/dtn-10-t-1.0-cosine-cifar100//deep_taxon_80.pt
+Epoch 81
+Epoch 82
+Epoch 83
+Epoch 84
+Epoch 85
+Epoch 86
+Epoch 87
+Epoch 88
+Epoch 89
+Epoch 90
+Epoch 91
+Epoch 92
+Epoch 93
+Epoch 94
+Epoch 95
+Epoch 96
+Epoch 97
+Epoch 98
+Epoch 99
+Epoch 100
+Model saved at /nethome/zwang910/file_storage/nips-2025/deep-taxon/project-checkin/dtn-10-t-1.0-cosine-cifar100//deep_taxon_100.pt
+Epoch 101
+Epoch 102
+Epoch 103
+Epoch 104
+Epoch 105
+Epoch 106
+Epoch 107
+Epoch 108
+Epoch 109
+Epoch 110
+Epoch 111
+Epoch 112
+Epoch 113
+Epoch 114
+Epoch 115
+Epoch 116
+Epoch 117
+Epoch 118
+Epoch 119
+Epoch 120
+Model saved at /nethome/zwang910/file_storage/nips-2025/deep-taxon/project-checkin/dtn-10-t-1.0-cosine-cifar100//deep_taxon_120.pt
+Epoch 121
+Epoch 122
+Epoch 123
+Epoch 124
+Epoch 125
+Epoch 126
+Epoch 127
+Epoch 128
+Epoch 129
+Epoch 130
+Epoch 131
+Epoch 132
+Epoch 133
+Epoch 134
+Epoch 135
+Epoch 136
+Epoch 137
+Epoch 138
+Epoch 139
+Epoch 140
+Model saved at /nethome/zwang910/file_storage/nips-2025/deep-taxon/project-checkin/dtn-10-t-1.0-cosine-cifar100//deep_taxon_140.pt
+Epoch 141
+Epoch 142
+Epoch 143
+Epoch 144
+Epoch 145
+Epoch 146
+Epoch 147
+Epoch 148
+Epoch 149
+Epoch 150
+Epoch 151
+Epoch 152
+Epoch 153
+Epoch 154
+Epoch 155
+Epoch 156
+Epoch 157
+Epoch 158
+Epoch 159
+Epoch 160
+Model saved at /nethome/zwang910/file_storage/nips-2025/deep-taxon/project-checkin/dtn-10-t-1.0-cosine-cifar100//deep_taxon_160.pt
+Epoch 161
+Epoch 162
+Epoch 163
+Epoch 164
+Epoch 165
+Epoch 166
+Epoch 167
+Epoch 168
+Epoch 169
+Epoch 170
+Epoch 171
+Epoch 172
+Epoch 173
+Epoch 174
+Epoch 175
+Epoch 176
+Epoch 177
+Epoch 178
+Epoch 179
+Epoch 180
+Model saved at /nethome/zwang910/file_storage/nips-2025/deep-taxon/project-checkin/dtn-10-t-1.0-cosine-cifar100//deep_taxon_180.pt
+Epoch 181
+Epoch 182
+Epoch 183
+Epoch 184
+Epoch 185
+Epoch 186
+Epoch 187
+Epoch 188
+Epoch 189
+Epoch 190
+Epoch 191
+Epoch 192
+Epoch 193
+Epoch 194
+Epoch 195
+Epoch 196
+Epoch 197
+Epoch 198
+Epoch 199
+Epoch 200
+Model saved at /nethome/zwang910/file_storage/nips-2025/deep-taxon/project-checkin/dtn-10-t-1.0-cosine-cifar100//deep_taxon_200.pt
+Epoch 201
+Epoch 202
+Epoch 203
+Epoch 204
+Epoch 205
+Epoch 206
+Epoch 207
+Epoch 208
+Epoch 209
+Epoch 210
+Epoch 211
+Epoch 212
+Epoch 213
+Epoch 214
+Epoch 215
+Epoch 216
+Epoch 217
+Epoch 218
+Epoch 219
+Epoch 220
+Model saved at /nethome/zwang910/file_storage/nips-2025/deep-taxon/project-checkin/dtn-10-t-1.0-cosine-cifar100//deep_taxon_220.pt
+Epoch 221
+Epoch 222
+Epoch 223
+Epoch 224
+Epoch 225
+Epoch 226
+Epoch 227
+Epoch 228
+Epoch 229
+Epoch 230
+Epoch 231
+Epoch 232
+Epoch 233
+Epoch 234
+Epoch 235
+Epoch 236
+Epoch 237
+Epoch 238
+Epoch 239
+Epoch 240
+Model saved at /nethome/zwang910/file_storage/nips-2025/deep-taxon/project-checkin/dtn-10-t-1.0-cosine-cifar100//deep_taxon_240.pt
+Epoch 241
+Epoch 242
+Epoch 243
+Epoch 244
+Epoch 245
+Epoch 246
+Epoch 247
+Epoch 248
+Epoch 249
+Epoch 250
+Epoch 251
+Epoch 252
+Epoch 253
+Epoch 254
+Epoch 255
+Epoch 256
+Epoch 257
+Epoch 258
+Epoch 259
+Epoch 260
+Model saved at /nethome/zwang910/file_storage/nips-2025/deep-taxon/project-checkin/dtn-10-t-1.0-cosine-cifar100//deep_taxon_260.pt
+Epoch 261
+Epoch 262
+Epoch 263
+Epoch 264
+Epoch 265
+Epoch 266
+Epoch 267
+Epoch 268
+Epoch 269
+Epoch 270
+Epoch 271
+Epoch 272
+Epoch 273
+Epoch 274
+Epoch 275
+Epoch 276
+Epoch 277
+Epoch 278
+Epoch 279
+Epoch 280
+Model saved at /nethome/zwang910/file_storage/nips-2025/deep-taxon/project-checkin/dtn-10-t-1.0-cosine-cifar100//deep_taxon_280.pt
+Epoch 281
+Epoch 282
+Epoch 283
+Epoch 284
+Epoch 285
+Epoch 286
+Epoch 287
+Epoch 288
+Epoch 289
+Epoch 290
+Epoch 291
+Epoch 292
+Epoch 293
+Epoch 294
+Epoch 295
+Epoch 296
+Epoch 297
+Epoch 298
+Epoch 299
+Epoch 300
+Model saved at /nethome/zwang910/file_storage/nips-2025/deep-taxon/project-checkin/dtn-10-t-1.0-cosine-cifar100//deep_taxon_300.pt
+Epoch 301
+Epoch 302
+Epoch 303
+Epoch 304
+Epoch 305
+Epoch 306
+Epoch 307
+Epoch 308
+Epoch 309
+Epoch 310
+Epoch 311
+Epoch 312
+Epoch 313
+Epoch 314
+Epoch 315
+Epoch 316
+Epoch 317
+Epoch 318
+Epoch 319
+Epoch 320
+Model saved at /nethome/zwang910/file_storage/nips-2025/deep-taxon/project-checkin/dtn-10-t-1.0-cosine-cifar100//deep_taxon_320.pt
+Epoch 321
+Epoch 322
+Epoch 323
+Epoch 324
+Epoch 325
+Epoch 326
+Epoch 327
+Epoch 328
+Epoch 329
+Epoch 330
+Epoch 331
+Epoch 332
+Epoch 333
+Epoch 334
+Epoch 335
+Epoch 336
+Epoch 337
+Epoch 338
+Epoch 339
+Epoch 340
+Model saved at /nethome/zwang910/file_storage/nips-2025/deep-taxon/project-checkin/dtn-10-t-1.0-cosine-cifar100//deep_taxon_340.pt
+Epoch 341
+Epoch 342
+Epoch 343
+Epoch 344
+Epoch 345
+Epoch 346
+Epoch 347
+Epoch 348
+Epoch 349
+Epoch 350
+Epoch 351
+Epoch 352
+Epoch 353
+Epoch 354
+Epoch 355
+Epoch 356
+Epoch 357
+Epoch 358
+Epoch 359
+Epoch 360
+Model saved at /nethome/zwang910/file_storage/nips-2025/deep-taxon/project-checkin/dtn-10-t-1.0-cosine-cifar100//deep_taxon_360.pt
+Epoch 361
+Epoch 362
+Epoch 363
+Epoch 364
+Epoch 365
+Epoch 366
+Epoch 367
+Epoch 368
+Epoch 369
+Epoch 370
+Epoch 371
+Epoch 372
+Epoch 373
+Epoch 374
+Epoch 375
+Epoch 376
+Epoch 377
+Epoch 378
+Epoch 379
+Epoch 380
+Model saved at /nethome/zwang910/file_storage/nips-2025/deep-taxon/project-checkin/dtn-10-t-1.0-cosine-cifar100//deep_taxon_380.pt
+Epoch 381
+Epoch 382
+Epoch 383
+Epoch 384
+Epoch 385
+Epoch 386
+Epoch 387
+Epoch 388
+Epoch 389
+Epoch 390
+Epoch 391
+Epoch 392
+Epoch 393
+Epoch 394
+Epoch 395
+Epoch 396
+Epoch 397
+Epoch 398
+Epoch 399
+Epoch 400
+Model saved at /nethome/zwang910/file_storage/nips-2025/deep-taxon/project-checkin/dtn-10-t-1.0-cosine-cifar100//deep_taxon_400.pt
+Epoch 401
+Epoch 402
+Epoch 403
+Epoch 404
+Epoch 405
+Epoch 406
+Epoch 407
+Epoch 408
+Epoch 409
+Epoch 410
+Epoch 411
+Epoch 412
+Epoch 413
+Epoch 414
+Epoch 415
+Epoch 416
+Epoch 417
+Epoch 418
+Epoch 419
+Epoch 420
+Model saved at /nethome/zwang910/file_storage/nips-2025/deep-taxon/project-checkin/dtn-10-t-1.0-cosine-cifar100//deep_taxon_420.pt
+Epoch 421
+Epoch 422
+Epoch 423
+Epoch 424
+Epoch 425
+Epoch 426
+Epoch 427
+Epoch 428
+Epoch 429
+Epoch 430
+Epoch 431
+Epoch 432
+Epoch 433
+Epoch 434
+Epoch 435
+Epoch 436
+Epoch 437
+slurmstepd: error: *** JOB 943888 ON trublu CANCELLED AT 2025-05-01T10:36:27 ***

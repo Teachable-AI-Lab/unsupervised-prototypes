@@ -691,7 +691,7 @@ def get_data_loader(dataset, batch_size, normalize,
     # Convert dataset name to lowercase for flexible input
     dataset = dataset.lower()
 
-    if dataset == 'cifar-10':
+    if dataset == 'cifar-10' or dataset == 'cifar-10-eval':
         dataset_class = datasets.CIFAR10
         data_dir = 'data/CIFAR10'
         if normalize:
@@ -704,11 +704,24 @@ def get_data_loader(dataset, batch_size, normalize,
                 transforms.ToTensor()
             ])
 
-    elif dataset == 'cifar-100':
+    elif dataset == 'cifar-100' or dataset == 'cifar-100-eval':
         dataset_class = datasets.CIFAR100
         data_dir = 'data/CIFAR100'
         if normalize:
             # Common normalization values for CIFAR-100
+            transform = transforms.Compose([
+                transforms.ToTensor(),
+                transforms.Normalize((0.5071, 0.4867, 0.4408), (0.2675, 0.2565, 0.2761))
+            ])
+        else:
+            transform = transforms.Compose([
+                transforms.ToTensor()
+            ])
+        
+    elif dataset == 'cifar-20-eval':
+        dataset_class = CIFAR100Coarse
+        data_dir = 'data/CIFAR20'
+        if normalize:
             transform = transforms.Compose([
                 transforms.ToTensor(),
                 transforms.Normalize((0.5071, 0.4867, 0.4408), (0.2675, 0.2565, 0.2761))
@@ -819,13 +832,19 @@ def get_data_loader(dataset, batch_size, normalize,
 
     elif dataset == 'cifar-10' or dataset == 'cifar-100':
         train_set = dataset_class(root=data_dir, train=True, download=download, transform=transform)
-        train_set = SimCLRDatasetWrapper(train_set, crop_size=32)
+        train_set_aug = SimCLRDatasetWrapper(train_set, crop_size=32)
         test_set = dataset_class(root=data_dir, train=False, download=download, transform=transform)
+
+    elif dataset == 'cifar-10-eval' or dataset == 'cifar-100-eval' or dataset == 'cifar-20-eval':
+        train_set = dataset_class(root=data_dir, train=True, download=download, transform=transform)
+        # train_set_aug = SimCLRDatasetWrapper(train_set, crop_size=32)
+        test_set = dataset_class(root=data_dir, train=False, download=download, transform=transform)
+
 
     elif dataset == 'stl-10':
         # STL-10 has train and test splits
         train_set = dataset_class(root=data_dir, split='unlabeled', download=download, transform=transform)
-        train_set = SimCLRDatasetWrapper(train_set, crop_size=96)
+        train_set_aug = SimCLRDatasetWrapper(train_set, crop_size=96)
         test_set = dataset_class(root=data_dir, split='test', download=download, transform=transform)
         # radnomly split the dataset into 2 parts: 80% for training and 20% for testing
 
@@ -846,7 +865,7 @@ def get_data_loader(dataset, batch_size, normalize,
 
     if dataset == 'cifar-10' or dataset == 'cifar-100' or dataset == 'stl-10':
         train_loader = DataLoader(
-            train_set,
+            train_set_aug,
             batch_size=batch_size, # This N determines the size of view1_batch and view2_batch
             shuffle=True,
             num_workers=8,
@@ -868,6 +887,44 @@ def get_data_loader(dataset, batch_size, normalize,
 
     return train_loader, test_loader, train_set, test_set
 
+class CIFAR100Coarse(datasets.CIFAR100):
+    def __init__(self, root, train=True, transform=None, target_transform=None, download=False):
+        super(CIFAR100Coarse, self).__init__(root, train, transform, target_transform, download)
+
+        # update labels
+        coarse_labels = np.array([ 4,  1, 14,  8,  0,  6,  7,  7, 18,  3,
+                                   3, 14,  9, 18,  7, 11,  3,  9,  7, 11,
+                                   6, 11,  5, 10,  7,  6, 13, 15,  3, 15, 
+                                   0, 11,  1, 10, 12, 14, 16,  9, 11,  5,
+                                   5, 19,  8,  8, 15, 13, 14, 17, 18, 10,
+                                   16, 4, 17,  4,  2,  0, 17,  4, 18, 17,
+                                   10, 3,  2, 12, 12, 16, 12,  1,  9, 19, 
+                                   2, 10,  0,  1, 16, 12,  9, 13, 15, 13,
+                                  16, 19,  2,  4,  6, 19,  5,  5,  8, 19,
+                                  18,  1,  2, 15,  6,  0, 17,  8, 14, 13])
+        self.targets = coarse_labels[self.targets]
+
+        # update classes
+        self.classes = [['beaver', 'dolphin', 'otter', 'seal', 'whale'],
+                        ['aquarium_fish', 'flatfish', 'ray', 'shark', 'trout'],
+                        ['orchid', 'poppy', 'rose', 'sunflower', 'tulip'],
+                        ['bottle', 'bowl', 'can', 'cup', 'plate'],
+                        ['apple', 'mushroom', 'orange', 'pear', 'sweet_pepper'],
+                        ['clock', 'keyboard', 'lamp', 'telephone', 'television'],
+                        ['bed', 'chair', 'couch', 'table', 'wardrobe'],
+                        ['bee', 'beetle', 'butterfly', 'caterpillar', 'cockroach'],
+                        ['bear', 'leopard', 'lion', 'tiger', 'wolf'],
+                        ['bridge', 'castle', 'house', 'road', 'skyscraper'],
+                        ['cloud', 'forest', 'mountain', 'plain', 'sea'],
+                        ['camel', 'cattle', 'chimpanzee', 'elephant', 'kangaroo'],
+                        ['fox', 'porcupine', 'possum', 'raccoon', 'skunk'],
+                        ['crab', 'lobster', 'snail', 'spider', 'worm'],
+                        ['baby', 'boy', 'girl', 'man', 'woman'],
+                        ['crocodile', 'dinosaur', 'lizard', 'snake', 'turtle'],
+                        ['hamster', 'mouse', 'rabbit', 'shrew', 'squirrel'],
+                        ['maple_tree', 'oak_tree', 'palm_tree', 'pine_tree', 'willow_tree'],
+                        ['bicycle', 'bus', 'motorcycle', 'pickup_truck', 'train'],
+                        ['lawn_mower', 'rocket', 'streetcar', 'tank', 'tractor']]
 class SimCLRDatasetWrapper(Dataset):
     """
     Wraps a dataset to produce two augmented views for SimCLR.
@@ -945,108 +1002,9 @@ def load_config_from_json(config_path):
     return config_args
 
 
-def get_pretrained(model_name):
-    checkpoint_path = '/nethome/zwang910/file_storage/nips-2025/deep-taxon/pretrained/'
-    model_name = model_name
-    model = models.resnet50(pretrained=False)
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    # --- 2. Load the Checkpoint File ---
-    print(f"Loading checkpoint from: {checkpoint_path}")
-    # Load onto CPU first to make key inspection and processing easier
-    checkpoint = torch.load(checkpoint_path + model_name, map_location=device)
-
-    # --- 3. Extract and Process the State Dictionary ---
-    if 'state_dict' not in checkpoint:
-        # If 'state_dict' is not found, maybe the checkpoint *is* the state_dict
-        if isinstance(checkpoint, dict):
-            print("Warning: Checkpoint does not contain 'state_dict' key. Assuming the loaded object IS the state_dict.")
-            original_state_dict = checkpoint
-        else:
-            raise KeyError(f"Checkpoint does not seem to be a dictionary or contain the key 'state_dict'. Found type: {type(checkpoint)}")
-    else:
-        original_state_dict = checkpoint['state_dict']
-        print("Extracted state_dict from checkpoint.")
-
-    # *** CRITICAL STEP: Determine the correct prefix to remove ***
-    # Inspect the keys of your specific checkpoint file to find the correct prefix.
-    # Common prefixes for SimCLR models trained with distributed training:
-    # 'module.encoder.', 'module.backbone.', 'encoder.', 'backbone.'
-    # Uncomment the next line to print the first few keys and check:
-    # print("First 10 keys from checkpoint state_dict:", list(original_state_dict.keys())[:10])
-
-    prefix_to_remove = "backbone." # <--- ADJUST THIS BASED ON YOUR INSPECTION!
-    print(f"Attempting to remove prefix: '{prefix_to_remove}'")
-
-    new_state_dict = OrderedDict()
-    keys_matched = 0
-    keys_unmatched_printed = 0
-    for k, v in original_state_dict.items():
-        if k.startswith(prefix_to_remove):
-            # Remove the prefix to match the standard ResNet-50 key names
-            name = k[len(prefix_to_remove):]
-            new_state_dict[name] = v
-            keys_matched += 1
-        else:
-            # Keep track of keys that didn't match the prefix, might be projection head etc.
-            if keys_unmatched_printed < 5: # Print first few unmatched keys
-                print(f"  - Key '{k}' did not match prefix, skipping for standard ResNet load.")
-                keys_unmatched_printed +=1
-            elif keys_unmatched_printed == 5:
-                print("  - (Further unmatched keys omitted)...")
-                keys_unmatched_printed += 1
-            # You could choose to add non-prefixed keys if needed, but for loading
-            # into standard ResNet, we usually only want the backbone weights.
-            # new_state_dict[k] = v # Uncomment this line if you expect non-prefixed keys to also be loaded
-
-    if keys_matched == 0:
-        print(f"\nWARNING: No keys matched the prefix '{prefix_to_remove}'.")
-        print("Please MANUALLY INSPECT the keys in your checkpoint and adjust `prefix_to_remove`.")
-        print("Checkpoint keys sample:", list(original_state_dict.keys())[:10])
-        # If you are sure there's no prefix, you might comment out the processing loop
-        # and use: new_state_dict = original_state_dict
-    else:
-        print(f"Processed {keys_matched} keys by removing prefix '{prefix_to_remove}'")
 
 
-    # --- 4. Load the Processed State Dictionary into the Model ---
-    print("Loading processed state_dict into the ResNet-50 model...")
-
-    # Use strict=False. This is important because:
-    #  - The SimCLR state_dict usually contains only the backbone weights, lacking the final 'fc' layer of the standard ResNet.
-    #  - The original SimCLR checkpoint might contain weights for a projection head (e.g., 'projector.fc1.weight') which are not in the standard ResNet.
-    # `strict=False` allows loading the weights that *do* match, ignoring the missing 'fc' keys and unexpected projection head keys.
-    load_result = model.load_state_dict(new_state_dict, strict=False)
-
-    # Report missing/unexpected keys to understand what was loaded
-    print("\n--- Load State Dict Results ---")
-    if not load_result.missing_keys:
-        print("  - No missing keys.")
-    else:
-        print(f"  - Missing keys ({len(load_result.missing_keys)}): {load_result.missing_keys}")
-        if 'fc.weight' in load_result.missing_keys or 'fc.bias' in load_result.missing_keys:
-            print("     (INFO: Missing 'fc.weight'/'fc.bias' is expected as SimCLR checkpoint contains backbone weights).")
-
-    if not load_result.unexpected_keys:
-        print("  - No unexpected keys.")
-    else:
-        print(f"  - Unexpected keys ({len(load_result.unexpected_keys)}): {load_result.unexpected_keys}")
-        print("     (INFO: Unexpected keys might correspond to SimCLR projection head layers not present in standard ResNet).")
-    print("--- End Load State Dict Results ---")
-
-
-    # --- Final Steps ---
-    # Move the model to the appropriate device
-    model.to(device)
-
-    # Set the model to evaluation mode (disables dropout, uses running stats for BatchNorm)
-    model.eval()
-    model.fc = torch.nn.Identity()  # Remove the final classification layer
-
-    print(f"\nSuccessfully loaded weights into model = models.resnet50(pretrained=False/weights=None).")
-    print(f"Model is on device '{device}' and in evaluation mode.")
-
-    # return model
-    return model
+############## Eval Metrics ##############
 
 def compute_dendrogram_purity(model, dataloader, label_annotation_matrix, device):
     """
