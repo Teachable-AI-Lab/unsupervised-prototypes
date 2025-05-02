@@ -14,24 +14,24 @@ No action taken.
 wandb: Using wandb-core as the SDK backend.  Please refer to https://wandb.me/wandb-core for more information.
 wandb: Currently logged in as: ndrsn0208 (ndrsn0208-georgia-institute-of-technology) to https://api.wandb.ai. Use `wandb login --relogin` to force relogin
 wandb: Tracking run with wandb version 0.19.8
-wandb: Run data is saved locally in /nethome/zwang910/research/unsupervised-prototypes/wandb/run-20250430_205645-t1w7i63z
+wandb: Run data is saved locally in /nethome/zwang910/research/unsupervised-prototypes/wandb/run-20250501_104319-5i7628el
 wandb: Run `wandb offline` to turn off syncing.
-wandb: Syncing run dtn-10-t0.5-stepLR-stl10
+wandb: Syncing run dtn-10-t-0.5-cifar100
 wandb: ⭐️ View project at https://wandb.ai/ndrsn0208-georgia-institute-of-technology/deep-taxon
-wandb: 🚀 View run at https://wandb.ai/ndrsn0208-georgia-institute-of-technology/deep-taxon/runs/t1w7i63z
+wandb: 🚀 View run at https://wandb.ai/ndrsn0208-georgia-institute-of-technology/deep-taxon/runs/5i7628el
 Configuration loaded successfully:
 ------------------------------
   batch_size: 128 (Type: int)
   contrastive_loss_weight: 100.0 (Type: float)
   convex_weight_lambda: 0.02 (Type: float)
-  dataset: stl-10 (Type: str)
-  dec_hidden_dim: (512, 3, 3) (Type: tuple)
+  dataset: cifar-100 (Type: str)
+  dec_hidden_dim: (512, 1, 1) (Type: tuple)
   decoder_name: resnet18 (Type: str)
   device_id: 0 (Type: int)
   dkl_margin: 1.2 (Type: float)
   dkl_weight_lambda: 0.02 (Type: float)
   embed_temp: 0.5 (Type: float)
-  enc_hidden_dim: 4608 (Type: int)
+  enc_hidden_dim: 512 (Type: int)
   encoder_name: resnet18 (Type: str)
   epochs: 501 (Type: int)
   input_dim: 3072 (Type: int)
@@ -41,28 +41,28 @@ Configuration loaded successfully:
   linear_probing_lr: 0.01 (Type: float)
   logvar_init_range: -1 (Type: int)
   lr: 0.001 (Type: float)
-  lr_scheduler: step (Type: str)
+  lr_scheduler: none (Type: str)
   model_save_interval: 20 (Type: int)
-  model_save_path: dtn-10-t0.5-stepLR-stl10 (Type: str)
-  n_classes: 10 (Type: int)
+  model_save_path: dtn-10-t-0.5-cifar100 (Type: str)
+  n_classes: 100 (Type: int)
   n_layers: 10 (Type: int)
   normalize: False (Type: bool)
   pcx_temp: 0.5 (Type: float)
   pretrained_encoder: False (Type: bool)
   pretraining_epochs: 0 (Type: int)
   pretraining_lr: 0.001 (Type: float)
-  recon_weight: 1.0 (Type: float)
+  recon_weight: 4.0 (Type: float)
   seed: 0 (Type: int)
   use_contrastive_loss: True (Type: bool)
   vade_baseline: False (Type: bool)
   wandb: True (Type: bool)
   wandb_project: deep-taxon (Type: str)
-  wandb_run_name: dtn-10-t0.5-stepLR-stl10 (Type: str)
+  wandb_run_name: dtn-10-t-0.5-cifar100 (Type: str)
 ------------------------------
 Loading data...
 Start training...
 Epoch 0
-Model saved at /nethome/zwang910/file_storage/nips-2025/deep-taxon/project-checkin/dtn-10-t0.5-stepLR-stl10//deep_taxon_0.pt
+Model saved at /nethome/zwang910/file_storage/nips-2025/deep-taxon/project-checkin/dtn-10-t-0.5-cifar100//deep_taxon_0.pt
 Epoch 1
 Epoch 2
 Epoch 3
@@ -83,7 +83,7 @@ Epoch 17
 Epoch 18
 Epoch 19
 Epoch 20
-Model saved at /nethome/zwang910/file_storage/nips-2025/deep-taxon/project-checkin/dtn-10-t0.5-stepLR-stl10//deep_taxon_20.pt
+Model saved at /nethome/zwang910/file_storage/nips-2025/deep-taxon/project-checkin/dtn-10-t-0.5-cifar100//deep_taxon_20.pt
 Epoch 21
 Epoch 22
 Epoch 23
@@ -104,7 +104,7 @@ Epoch 37
 Epoch 38
 Epoch 39
 Epoch 40
-Model saved at /nethome/zwang910/file_storage/nips-2025/deep-taxon/project-checkin/dtn-10-t0.5-stepLR-stl10//deep_taxon_40.pt
+Model saved at /nethome/zwang910/file_storage/nips-2025/deep-taxon/project-checkin/dtn-10-t-0.5-cifar100//deep_taxon_40.pt
 Epoch 41
 Epoch 42
 Epoch 43
@@ -120,35 +120,4 @@ Epoch 52
 Epoch 53
 Epoch 54
 Epoch 55
-Epoch 56
-Epoch 57
-Epoch 58
-Epoch 59
-Epoch 60
-Model saved at /nethome/zwang910/file_storage/nips-2025/deep-taxon/project-checkin/dtn-10-t0.5-stepLR-stl10//deep_taxon_60.pt
-Epoch 61
-Epoch 62
-Epoch 63
-Epoch 64
-Epoch 65
-Epoch 66
-Epoch 67
-Epoch 68
-Epoch 69
-Epoch 70
-Epoch 71
-Epoch 72
-Epoch 73
-Epoch 74
-Epoch 75
-Epoch 76
-Epoch 77
-Epoch 78
-Epoch 79
-Epoch 80
-Model saved at /nethome/zwang910/file_storage/nips-2025/deep-taxon/project-checkin/dtn-10-t0.5-stepLR-stl10//deep_taxon_80.pt
-Epoch 81
-Epoch 82
-Epoch 83
-Epoch 84
-Epoch 85
+slurmstepd: error: *** JOB 944573 ON chappie CANCELLED AT 2025-05-01T11:56:29 ***

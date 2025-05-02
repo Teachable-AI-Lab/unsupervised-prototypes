@@ -160,7 +160,7 @@ elif args.lr_scheduler == 'linear-up':
 elif args.lr_scheduler == 'linear-down':
     scheduler = optim.lr_scheduler.LinearLR(optimizer, start_factor=0.1, end_factor=1.0, total_iters=args.epochs)
 elif args.lr_scheduler == 'cosine':
-    scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs, eta_min=2e-5)
+    scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs, eta_min=1e-5)
     
 
 print('Start training...')
@@ -346,6 +346,21 @@ for epoch in range(epochs):
             acc = utils.basic_node_evaluation(model, annotation, stl10_test_loader, device)
             if args.wandb:
                 wandb.log({'Accuracy': acc, 'epoch': epoch})
+
+        elif args.dataset == 'cifar-10' or args.dataset == 'cifar-100':
+            cifar_train_loader, cifar_test_loader, _, _ = utils.get_data_loader(f'{args.dataset}-eval', 256, False)
+            annotation = utils.label_annotation(model, cifar_train_loader, args.n_classes, device)
+            acc = utils.basic_node_evaluation(model, annotation, cifar_test_loader, device)
+            if args.wandb:
+                wandb.log({'Accuracy': acc, 'epoch': epoch})
+            
+            if args.dataset == 'cifar-100':
+                # also evaluate on cifar-20
+                cifar20_train_loader, cifar20_test_loader, _, _ = utils.get_data_loader(f'cifar-20-eval', 256, False)
+                annotation = utils.label_annotation(model, cifar20_train_loader, 20, device)
+                acc = utils.basic_node_evaluation(model, annotation, cifar20_test_loader, device)
+                if args.wandb:
+                    wandb.log({'CIFAR-20 Accuracy': acc, 'epoch': epoch})
             
         else:
             annotation = utils.label_annotation(model, train_loader, args.n_classes, device)
