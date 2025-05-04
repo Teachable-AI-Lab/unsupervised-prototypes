@@ -1,9 +1,9 @@
 {
     "seed": 0,
-    "batch_size": 128,
+    "batch_size": 256,
     "epochs": 501,
     "lr": 1e-3,
-    "model_save_path": "dtn-10-cifar100-20",
+    "model_save_path": "dtn-10-rec-5-cifar100-20",
     "model_save_interval": 20,
     "device_id": 0,
     "lr_scheduler": "none",
@@ -13,7 +13,7 @@
     "pretraining_epochs": 0,
     "pretraining_lr": 1e-3,
     "kl1_weight": 1.0,
-    "recon_weight": 1.0,
+    "recon_weight": 5.0,
     "vade_baseline": false,
     "n_layers": 10,
     "latent_dim": 64,
@@ -31,9 +31,9 @@
     "normalize": false,
     "wandb": true,
     "wandb_project": "deep-taxon",
-    "wandb_run_name": "dtn-10-cifar100-20",
+    "wandb_run_name": "dtn-10-rec-5-cifar100-20",
     "use_contrastive_loss": true,
     "contrastive_loss_weight": 100.0,
-    "embed_temp": 0.5,
-    "pcx_temp": 0.5
+    "embed_temp": 0.3,
+    "pcx_temp": 0.3
   }

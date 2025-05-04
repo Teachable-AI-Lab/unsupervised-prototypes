@@ -21,7 +21,7 @@ import sys
 import wandb
 import json
 
-MODEL_SAVE_PATH_PREFIX = '/nethome/zwang910/file_storage/nips-2025/deep-taxon/project-checkin'
+MODEL_SAVE_PATH_PREFIX = '/nethome/zwang910/file_storage/nips-2025/deep-taxon/models'
 
 def set_seed(seed):
     torch.manual_seed(seed)
@@ -182,7 +182,7 @@ for epoch in range(epochs):
             x, _ = batch
             x = x.to(device)
 
-        # beta = utils.linear_annealing(steps, anneal_epochs=60000)     
+        # beta = utils.linear_annealing(epoch, anneal_epochs=100)     
         # model.kl1_weight = beta
 
         # if epoch < 10:
@@ -207,7 +207,7 @@ for epoch in range(epochs):
         # x_aug_1 = utils.augment(data, utils.cifar_aug)
         # x_aug_2 = utils.augment(data, utils.cifar_aug)
 
-        loss, recon_loss, kl1, kl2, _, pcx, _, _, z = model(x)  
+        loss, recon_loss, kl1, kl2, _, pcx, _, _, z, pcx_contrast = model(x)  
 
         # z: shape (2*batch_size, latent_dim)
         # compute contrastive loss
@@ -223,9 +223,21 @@ for epoch in range(epochs):
             z_sim_loss = utils.contrastive_loss(z_similarity, args.embed_temp) * args.contrastive_loss_weight
 
             # do cosine similarity
-            pcx = F.normalize(pcx, p=2, dim=1)
-            pcx_similarity = torch.matmul(pcx, pcx.T) # batch_size * 2, batch_size * 2
+            pcx_contrast = F.normalize(pcx_contrast, p=2, dim=1)
+            pcx_similarity = torch.matmul(pcx_contrast, pcx_contrast.T) # batch_size * 2, batch_size * 2
             pcx_sim_loss = utils.contrastive_loss(pcx_similarity, args.pcx_temp) * args.contrastive_loss_weight
+            
+            # pcx = F.normalize(pcx, p=2, dim=1)
+            # pcx_similarity = torch.matmul(pcx, pcx.T) # batch_size * 2, batch_size * 2
+            # use JSD similarity
+            # pcx_similarity = utils.jsd_similarity(pcx, gamma=0.5)
+            # pcx_sim_loss = utils.contrastive_loss(pcx_similarity, args.pcx_temp) * args.contrastive_loss_weight
+
+            # pcx_aug1 = pcx[:pcx.shape[0]//2] + 1e-20
+            # pcx_aug2 = pcx[pcx.shape[0]//2:] + 1e-20
+            # pcx_dkl_sim1 = F.kl_div(torch.log(pcx_aug1), pcx_aug2, reduction='batchmean')
+            # pcx_dkl_sim2 = F.kl_div(torch.log(pcx_aug2), pcx_aug1, reduction='batchmean')
+            # pcx_sim_loss = (pcx_dkl_sim1 + pcx_dkl_sim2)
             
             loss = loss + z_sim_loss + pcx_sim_loss
 
@@ -252,18 +264,18 @@ for epoch in range(epochs):
         scheduler.step()
     if not args.vade_baseline:
         pass
-        # if args.dataset == 'omniglot':
-        #     all_latent, all_labels, pcx, pis, centroid_list, H = utils.get_latent(model, train_loader, device)
-        # else:
-        #     all_latent, all_labels, pcx, pis, centroid_list, H = utils.get_latent(model, test_loader, device)
+        if args.dataset == 'omniglot':
+            all_latent, all_labels, pcx, pis, centroid_list, H = utils.get_latent(model, train_loader, device)
+        else:
+            all_latent, all_labels, pcx, pis, centroid_list, H = utils.get_latent(model, test_loader, device)
         # # viz_fig = untils.viz_examplar(model, test_data, n_data=1000, device=device, layer=5, k=10, normalize=args.normalize)
         # viz_tsne = utils.plot_tsne(all_latent, all_labels)
         # if args.wandb:
         #     wandb.log({'t-sne': wandb.Image(viz_tsne), 'epoch': epoch})
 
-        # viz_pcx = utils.plot_qcx(pcx)
-        # if args.wandb:
-        #     wandb.log({'viz_pcx': wandb.Image(viz_pcx), 'epoch': epoch})
+        viz_pcx = utils.plot_qcx(pcx)
+        if args.wandb:
+            wandb.log({'viz_pcx': wandb.Image(viz_pcx), 'epoch': epoch})
 
         # # viz_pi = utils.plot_pi(pis)
         # # if args.wandb:
