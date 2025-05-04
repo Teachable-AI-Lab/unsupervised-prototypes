@@ -69,6 +69,121 @@ def contrastive_loss(similarity_matrix, temperature=0.5):
 
     return loss
 
+def jsd_similarity(
+    # pcx_aug1: torch.Tensor,
+    # pcx_aug2: torch.Tensor,
+    pcx :torch.Tensor,
+    gamma: float = 5.0,
+    eps: float = 1e-20,
+    kl_div_log_target: bool = False
+) -> torch.Tensor:
+    """
+    Computes a SimCLR-like similarity matrix based on Jensen-Shannon Divergence (JSD).
+
+    Takes cluster assignment probabilities for two augmented views of a batch
+    and computes the pairwise similarity matrix exp(-gamma * JSD) between all
+    examples in the combined batch.
+
+    Args:
+        # pcx_aug1 (torch.Tensor): Cluster probabilities for the first augmented view.
+        #                          Shape: (batch_size, n_clusters).
+        # pcx_aug2 (torch.Tensor): Cluster probabilities for the second augmented view.
+        #                          Shape: (batch_size, n_clusters).
+        pcx (torch.Tensor): Cluster probabilities for both augmented views.
+        gamma (float): Scaling factor for the JSD in the exponential. Higher gamma
+                       means sharper similarity / more penalty for divergence.
+                       Defaults to 10.0.
+        eps (float): Small epsilon added for numerical stability (avoid log(0)).
+                     Defaults to 1e-12.
+       kl_div_log_target: Whether the input probabilities `p` for F.kl_div should be
+                          log probabilities. Kept False based on common JSD formulation
+                          using probabilities directly with KL divergence formula,
+                          but can be set True if needed depending on specific
+                          KL divergence implementation preferences. Default: False.
+
+
+    Returns:
+        torch.Tensor: Pairwise similarity matrix.
+                      Shape: (2 * batch_size, 2 * batch_size).
+    """
+    batch_size, n_clusters = pcx.shape
+    # device = pcx.device
+
+    # 1. Combine augmented batches
+    # pcx_all = torch.cat([pcx_aug1, pcx_aug2], dim=0) # Shape: (2 * batch_size, n_clusters)
+    pcx_all = pcx
+    N = pcx_all.shape[0] # N = 2 * batch_size
+
+    # Ensure probabilities are valid (sum to 1), although JSD works even if not strictly sum=1
+    # Add epsilon for numerical stability before log operations
+    pcx_all_stable = pcx_all + eps
+
+    # 2. Prepare for pairwise calculation via broadcasting
+    p = pcx_all_stable.unsqueeze(1)  # Shape: (N, 1, n_clusters)
+    q = pcx_all_stable.unsqueeze(0)  # Shape: (1, N, n_clusters)
+
+    # 3. Calculate pairwise mean distributions (m)
+    m = 0.5 * (p + q) # Shape: (N, N, n_clusters)
+
+    # 4. Calculate pairwise KL divergences D_KL(p || m) and D_KL(q || m)
+    # We need log(m) for F.kl_div's 'input' argument
+    log_m = torch.log(m) # Use log(m) directly as F.kl_div expects log-probs as input
+
+    # D_KL(p || m) = sum(p * log(p/m)) = sum(p * (log(p) - log(m)))
+    # F.kl_div(input, target) computes sum(target * (log(target) - input)) if log_target=True
+    # OR sum(target * (log(target) - input))) - THIS IS WRONG DOC for log_target=False
+    # Let's recheck Pytorch docs for kl_div (as of 2.x):
+    # If reduction is 'none', computes l = target * (log(target) - input) element-wise.
+    # If log_target=True, computes l = exp(target) * (target - input).
+
+    # So, to compute DKL(p || m) = sum(p * (log(p) - log(m))), using F.kl_div:
+    # input = log_m
+    # target = p
+    # log_target = False (since p is probability)
+    # F.kl_div computes element-wise: p * (log(p) - log_m) -> we sum over cluster dim
+    # Need log(p) as well if using the log_target=True path, but let's stick to log_target=False
+    log_p = torch.log(p)
+    kl_p_m = (p * (log_p - log_m)).sum(dim=2) # Shape: (N, N)
+    # Clamp negative values potentially caused by numerical inaccuracies near zero JSD
+    kl_p_m = F.relu(kl_p_m) # JSD components should be non-negative
+
+    # Similarly for D_KL(q || m)
+    log_q = torch.log(q)
+    kl_q_m = (q * (log_q - log_m)).sum(dim=2) # Shape: (N, N)
+    kl_q_m = F.relu(kl_q_m) # JSD components should be non-negative
+
+
+    # ---- Alternative using F.kl_div (ensure understanding of its arguments) ----
+    # # F.kl_div(input, target) where input=log_q, target=p calculates sum p*(log p - log q) = DKL(p||q)
+    # try:
+    #     # D_KL(p || m)
+    #     kl_p_m = F.kl_div(log_m, p, reduction='none', log_target=kl_div_log_target).sum(dim=2) # Shape: (N, N)
+    #     # D_KL(q || m)
+    #     kl_q_m = F.kl_div(log_m, q, reduction='none', log_target=kl_div_log_target).sum(dim=2) # Shape: (N, N)
+    # except RuntimeError as e:
+    #      print("RuntimeError during F.kl_div. Check inputs/eps/log_target.", e)
+    #      # Fallback or re-raise, here we use the manual calculation already done
+    #      log_p = torch.log(p)
+    #      kl_p_m = (p * (log_p - log_m)).sum(dim=2)
+    #      log_q = torch.log(q)
+    #      kl_q_m = (q * (log_q - log_m)).sum(dim=2)
+    # kl_p_m = F.relu(kl_p_m) # Clamp potential numerical negatives
+    # kl_q_m = F.relu(kl_q_m)
+    # ---- End Alternative ----
+
+
+    # 5. Calculate pairwise JSD
+    jsd = 0.5 * (kl_p_m + kl_q_m) # Shape: (N, N)
+
+    # Ensure JSD is non-negative (it should be, but clamp just in case of float issues)
+    # Note: JSD is bounded by log(2) for base e logarithm
+    jsd = F.relu(jsd)
+
+    # 6. Convert JSD divergence to similarity
+    similarity_matrix = torch.exp(-gamma * jsd) # Shape: (N, N)
+
+    return similarity_matrix
+
 def add_noise(x, noise_level=0.1, noise_type='gaussian'):
     '''
     x: (batch, C, H, W)
@@ -235,7 +350,7 @@ def label_annotation(model, support_loader, n_classes, device):
     with torch.no_grad():
         for i, (image, label) in enumerate(support_loader):
             image = image.to(device)
-            _, _, _, _, _, pcx_batch, _, _, _ = model(image)
+            _, _, _, _, _, pcx_batch, _, _, _, _ = model(image)
             pcx.append(pcx_batch)
             labels.append(label)
 
@@ -280,7 +395,7 @@ def basic_node_evaluation(model, annotation, query_loader, device):
     with torch.no_grad():
         for i, (image, label) in enumerate(query_loader):
             image = image.to(device)
-            _, _, _, _, _, pcx_batch, _, _, _ = model(image)
+            _, _, _, _, _, pcx_batch, _, _, _, _ = model(image)
             pcx.append(pcx_batch.detach().cpu())
             labels.append(label)
 
@@ -430,11 +545,11 @@ def get_latent(model, test_loader, device):
             all_latent.append(latent.detach().cpu())
             all_labels.append(target)
 
-            _, recon_loss, kl1, kl2, H, pcx, pi, _ = model(data)
+            _, recon_loss, kl1, kl2, H, pcx, pi, _, _, _ = model(data)
             all_pcx.append(pcx.detach().cpu())
             pis = pi.detach().cpu().numpy()
             # pis.append(pi)
-            if i == 0:
+            if i == 3:
                 break
     with torch.no_grad():
         mu_c = model.gmm_params()[1]
@@ -1005,89 +1120,9 @@ def load_config_from_json(config_path):
 
 
 ############## Eval Metrics ##############
-
-def compute_dendrogram_purity(model, dataloader, label_annotation_matrix, device):
-    """
-    Compute dendrogram purity using a Monte Carlo approximation.
-
-    Parameters:
-        model: DeepTaxonNet instance
-        dataloader: DataLoader for evaluation
-        label_annotation_matrix: Tensor of shape (n_classes, n_nodes)
-        device: torch.device
-    
-    Returns:
-        float: Approximate dendrogram purity
-    """
-    from itertools import combinations
-    import random
-
-    model.eval()
-    pcx_list, label_list = [], []
-
-    with torch.no_grad():
-        for x, y in dataloader:
-            x = x.to(device)
-            _, _, _, _, _, pcx_batch, _, _ = model(x)
-            pcx_list.append(pcx_batch.cpu())
-            label_list.append(y)
-
-    pcx = torch.cat(pcx_list, dim=0)  # (N, n_nodes)
-    labels = torch.cat(label_list, dim=0)  # (N,)
-    n_nodes = pcx.shape[1]
-
-    def lca_index(idx1, idx2):
-        """Returns the least common ancestor index in a binary heap."""
-        while idx1 != idx2:
-            if idx1 > idx2:
-                idx1 = (idx1 - 1) // 2
-            else:
-                idx2 = (idx2 - 1) // 2
-        return idx1
-
-    def descendant_leaves(lca_idx):
-        """Return all descendant leaf indices under a given LCA index."""
-        # Assumes a complete binary tree; leaves are in the bottom layer
-        leaves = []
-        queue = [lca_idx]
-        while queue:
-            node = queue.pop(0)
-            left = 2 * node + 1
-            right = 2 * node + 2
-            if left >= n_nodes:
-                leaves.append(node)
-            else:
-                queue.extend([left, right])
-        return leaves
-
-    label_to_indices = defaultdict(list)
-    for i, label in enumerate(labels):
-        label_to_indices[int(label)].append(i)
-
-    sample_pairs = []
-    for indices in label_to_indices.values():
-        if len(indices) >= 2:
-            sampled = random.sample(list(combinations(indices, 2)), min(100, len(indices) * (len(indices) - 1) // 2))
-            sample_pairs.extend(sampled)
-
-    purity_sum = 0
-    for i, j in sample_pairs:
-        node_i = pcx[i].argmax().item()
-        node_j = pcx[j].argmax().item()
-        lca = lca_index(node_i, node_j)
-        desc = descendant_leaves(lca)
-        label = labels[i].item()
-        count_label = sum(label_annotation_matrix[label][leaf].item() for leaf in desc)
-        total = sum(label_annotation_matrix[:, leaf].sum().item() for leaf in desc)
-        purity = count_label / total if total > 0 else 0
-        purity_sum += purity
-
-    return purity_sum / len(sample_pairs)
-
-
 from collections import defaultdict
 
-def compute_leaf_purity(model, dataloader, device='cuda'):
+def leaf_purity(model, dataloader, device='cuda'):
     """
     Computes the soft leaf purity for GMMDeepTaxonNet.
     Uses soft cluster assignments (p(c|x)) and true labels instead of hard assignments.
@@ -1132,6 +1167,7 @@ def compute_leaf_purity(model, dataloader, device='cuda'):
 
     # Stack everything: shapes → (N, L) and (N,)
     all_probs = torch.cat(all_probs, dim=0)     # (N, L)
+    all_probs = all_probs[:, :2**model.n_layers]  # Keep only the first 2^L columns (leaf nodes)
     all_labels = torch.cat(all_labels, dim=0)   # (N,)
     num_leaves = all_probs.shape[1]
 
@@ -1186,7 +1222,7 @@ def compute_nmi(model, annotation, dataloader, device):
     with torch.no_grad():
         for images, labels in dataloader:
             images = images.to(device)
-            _, _, _, _, _, pcx_batch, _, _ = model(images)
+            _, _, _, _, _, pcx_batch, _, _, _ = model(images)
             pcx_batch = pcx_batch.detach().cpu()
             
             # Soft prediction using annotation
@@ -1202,7 +1238,7 @@ def compute_nmi(model, annotation, dataloader, device):
     nmi_score = normalized_mutual_info_score(all_labels, all_preds)
     return nmi_score
 
-def compute_soft_dendrogram_purity_test_only(model, test_dataloader, device, epsilon=1e-9):
+def soft_dendrogram_purity(model, test_dataloader, device, epsilon=1e-9):
 
     model.eval()
     model.to(device)

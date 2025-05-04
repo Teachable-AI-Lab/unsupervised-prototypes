@@ -152,6 +152,9 @@ class DeepTaxonNet(nn.Module):
             self.encoder = Encoder28x28()
         elif self.encoder_name == "omniglot":
             self.encoder = OmniglotEncoder()
+        elif self.encoder_name == "resnet":
+            size = int((self.input_dim / 3)**0.5)
+            self.encoder = Resnet_Encoder(s0=4, nf=32, nf_max=256, size=size)
         else:
             raise ValueError("Unknown encoder type")
         
@@ -172,6 +175,9 @@ class DeepTaxonNet(nn.Module):
             self.decoder_raw = Decoder28x28()
         elif self.decoder_name == "omniglot":
             self.decoder_raw = OmniglotDecoder()
+        elif self.decoder_name == "resnet":
+            size = int((self.input_dim / 3)**0.5)
+            self.decoder_raw = Resnet_Decoder(s0=4, nf=32, nf_max=256, size=size)
         else:
             raise ValueError("Unknown decoder type")
 
@@ -216,6 +222,10 @@ class DeepTaxonNet(nn.Module):
                 nn.Unflatten(1, (self.dec_hidden_dim[0], self.dec_hidden_dim[1], self.dec_hidden_dim[2])),
                 self.decoder_raw
             )
+
+        self.pcx_projection = nn.Sequential(
+            nn.Linear(2**(self.n_layers+1)-1, 64),
+        )
 
         # init_range = 1e-5  # or compute your desired range based on a fan_in value
         # first_linear = self.decoder[0]  # Access the first element, which is the nn.Linear layer
@@ -447,6 +457,8 @@ class DeepTaxonNet(nn.Module):
 
         loss = recon_loss - kl1 - kl2
 
+        pcx_contrastive = self.pcx_projection(pcx)
+
         # print("alphas", alphas)
 
         if not self.vade_baseline:
@@ -515,7 +527,7 @@ class DeepTaxonNet(nn.Module):
             # print("dkl_penalty", dkl_penalty.sum().item())
             loss = loss + dkl_penalty.sum()
 
-        return loss, recon_loss, kl1, kl2, H, pcx, pi, dkl_list, z_contrastive
+        return loss, recon_loss, kl1, kl2, H, pcx, pi, dkl_list, z_contrastive, pcx_contrastive
     
     def softclip(self, tensor, min):
         """ Clips the tensor values at the minimum value min in a softway. Taken from Handful of Trials """
